@@ -11,8 +11,6 @@ testpaths = ["tests"]
 
 markers = [
     "slow: Marks test as being slow",
-    "has_gpu: Marks test as requiring a GPU to run",
-    "has_mps: Marks test as requiring an MPS device to run",
 ]
 
 [tool.mypy]
@@ -37,7 +35,10 @@ disable_error_code = ["attr-defined"]
 
 [[tool.mypy.overrides]]
 
-module = []
+module = [
+    "torchtext",
+    "torchvision",
+]
 
 ignore_missing_imports = true
 
@@ -71,7 +72,7 @@ max-complexity = 10
 
 [tool.ruff.isort]
 
-known-first-party = ["dataload", "tests"]
+known-first-party = ["dpshdl", "tests"]
 combine-as-imports = true
 
 [tool.ruff.pydocstyle]

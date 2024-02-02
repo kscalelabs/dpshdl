@@ -1,1 +1,1 @@
-recursive-include dataload/ *.py *.txt py.typed MANIFEST.in
+recursive-include dpshdl/ *.py *.txt py.typed MANIFEST.in

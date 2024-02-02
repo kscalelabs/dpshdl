@@ -1,12 +1,12 @@
 # Makefile
 
 define HELP_MESSAGE
-                    dataload
+                    dpshdl
 
 # Installing
 
-1. Create a new Conda environment: `conda create --name dataload python=3.11`
-2. Activate the environment: `conda activate dataload`
+1. Create a new Conda environment: `conda create --name dpshdl python=3.11`
+2. Activate the environment: `conda activate dpshdl`
 3. Install the package: `make install-dev`
 
 # Running Tests

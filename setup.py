@@ -9,26 +9,26 @@ with open("README.md", "r", encoding="utf-8") as f:
     long_description: str = f.read()
 
 
-with open("dataload/requirements.txt", "r", encoding="utf-8") as f:
+with open("dpshdl/requirements.txt", "r", encoding="utf-8") as f:
     requirements: list[str] = f.read().splitlines()
 
 
-with open("dataload/requirements-dev.txt", "r", encoding="utf-8") as f:
+with open("dpshdl/requirements-dev.txt", "r", encoding="utf-8") as f:
     requirements_dev: list[str] = f.read().splitlines()
 
 
-with open("dataload/__init__.py", "r", encoding="utf-8") as fh:
+with open("dpshdl/__init__.py", "r", encoding="utf-8") as fh:
     version_re = re.search(r"^__version__ = \"([^\"]*)\"", fh.read(), re.MULTILINE)
-assert version_re is not None, "Could not find version in dataload/__init__.py"
+assert version_re is not None, "Could not find version in dpshdl/__init__.py"
 version: str = version_re.group(1)
 
 
 setup(
-    name="dataload",
+    name="dpshdl",
     version=version,
     description="Framework-agnostic library for loading data",
     author="Benjamin Bolte",
-    url="https://github.com/dpshai/dataload",
+    url="https://github.com/dpshai/dpshdl",
     long_description=long_description,
     long_description_content_type="text/markdown",
     python_requires=">=3.11",

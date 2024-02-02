@@ -5,3 +5,7 @@ darglint
 mypy
 pytest
 ruff
+
+# Types
+types-Pillow
+types-requests
