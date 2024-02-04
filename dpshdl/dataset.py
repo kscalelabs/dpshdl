@@ -111,7 +111,7 @@ class TensorDataset(Dataset[Tarrays], Generic[Tarrays]):
         dim: The dimension to sample from.
     """
 
-    def __init__(self, tensors: Sequence[np.ndarray], dim: int = 0) -> None:
+    def __init__(self, *tensors: np.ndarray, dim: int = 0) -> None:
         super().__init__()
 
         self.tensors = tensors
