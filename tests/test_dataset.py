@@ -3,10 +3,12 @@
 import itertools
 from typing import Iterator
 
+import numpy as np
+
 import dpshdl as dl
 
 
-class DummyDataset(dl.Dataset[int]):
+class DummyDataset(dl.Dataset[int, np.ndarray]):
     def __init__(self, value: int) -> None:
         super().__init__()
 
@@ -14,6 +16,9 @@ class DummyDataset(dl.Dataset[int]):
 
     def next(self) -> int:
         return self.value
+
+    def collate(self, items: list[int]) -> np.ndarray:
+        return dl.collate_non_null(items)
 
 
 def test_dataset_simple() -> None:
@@ -24,17 +29,17 @@ def test_dataset_simple() -> None:
 
 def test_round_robin_dataset() -> None:
     dss = [DummyDataset(i) for i in range(5)]
-    ds = dl.RoundRobinDataset(dss)
+    ds = dl.RoundRobinDataset(dss, dss[0].collate)
     assert list(itertools.islice(ds, 10)) == [0, 1, 2, 3, 4, 0, 1, 2, 3, 4]
 
 
 def test_random_dataset() -> None:
     dss = [DummyDataset(i) for i in range(5)]
-    ds = dl.RandomDataset(dss)
+    ds = dl.RandomDataset(dss, dss[0].collate)
     assert all(0 <= i < 5 for i in itertools.islice(ds, 10))
 
 
-class DummyChunkedDataset(dl.ChunkedDataset[int]):
+class DummyChunkedDataset(dl.ChunkedDataset[int, np.ndarray]):
     def __init__(self, value: int) -> None:
         super().__init__()
 
@@ -43,6 +48,9 @@ class DummyChunkedDataset(dl.ChunkedDataset[int]):
     def next_chunk(self) -> Iterator[int]:
         for i in range(self.value):
             yield i
+
+    def collate(self, items: list[int]) -> np.ndarray:
+        return dl.collate_non_null(items)
 
 
 def test_chunked_dataset() -> None:
