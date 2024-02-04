@@ -60,7 +60,7 @@ class MNIST(TensorDataset[tuple[np.ndarray, np.ndarray]]):
         self.labels = one_hot_fn(labels, 10) if one_hot else labels
         self.images = self.as_dtype(images)
 
-        super().__init__([self.labels, self.images])
+        super().__init__(self.labels, self.images)
 
     def as_dtype(self, images: np.ndarray) -> np.ndarray:
         if self.dtype == "int8":
