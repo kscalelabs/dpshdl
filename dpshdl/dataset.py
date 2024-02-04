@@ -14,11 +14,15 @@ from dataclasses import dataclass
 from queue import Queue
 from typing import Generic, Iterator, Sequence, TypeVar
 
+import numpy as np
+
+from dpshdl.numpy import worker_chunk
 from dpshdl.utils import TextBlock, configure_logging, render_text_blocks
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+Tarrays = TypeVar("Tarrays", bound=tuple[np.ndarray, ...])
 
 
 class Dataset(Iterator[T], Generic[T], ABC):
@@ -95,6 +99,37 @@ class Dataset(Iterator[T], Generic[T], ABC):
         elapsed_time = time.time() - start_time
         samples_per_second = i / elapsed_time
         logger.info("Tested %d samples in %f seconds (%f samples per second)", i + 1, elapsed_time, samples_per_second)
+
+
+class TensorDataset(Dataset[Tarrays], Generic[Tarrays]):
+    """Defines a dataset that yields samples from a tensor.
+
+    All provided tensors should have the same shape in the ``dim`` dimension.
+
+    Parameters:
+        tensors: The tensors to sample from.
+        dim: The dimension to sample from.
+    """
+
+    def __init__(self, tensors: Sequence[np.ndarray], dim: int = 0) -> None:
+        super().__init__()
+
+        self.tensors = tensors
+        self._worker_tensors = list(tensors)
+
+        # Gets the number of samples.
+        self.num_samples = tensors[0].shape[dim]
+        if not all(t.shape[dim] == self.num_samples for t in tensors):
+            raise ValueError("All tensors must have the same shape in the specified dimension.")
+
+        self.rand = np.random.RandomState(0)
+
+    def worker_init(self, worker_id: int, num_workers: int) -> None:
+        self._worker_tensors = [worker_chunk(t, worker_id, num_workers) for t in self.tensors]
+
+    def next(self) -> Tarrays:
+        index = self.rand.randint(0, self.num_samples)
+        return tuple(np.take(t, index, axis=0) for t in self._worker_tensors)  # type: ignore[return-value]
 
 
 class ChunkedDataset(Dataset[T], Generic[T], ABC):
