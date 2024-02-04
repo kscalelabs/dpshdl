@@ -9,16 +9,16 @@ from typing import Literal
 
 import numpy as np
 
-from dpshdl.dataset import Dataset
+from dpshdl.dataset import TensorDataset
 from dpshdl.experiments import FileDownloader
-from dpshdl.numpy import one_hot as one_hot_fn, worker_chunk
+from dpshdl.numpy import one_hot as one_hot_fn
 
 logger = logging.getLogger(__name__)
 
 MnistDtype = Literal["int8", "float32"]
 
 
-class MNIST(Dataset[tuple[np.ndarray, np.ndarray]]):
+class MNIST(TensorDataset[tuple[np.ndarray, np.ndarray]]):
     def __init__(
         self,
         train: bool,
@@ -26,8 +26,6 @@ class MNIST(Dataset[tuple[np.ndarray, np.ndarray]]):
         dtype: MnistDtype = "int8",
         one_hot: bool = False,
     ) -> None:
-        super().__init__()
-
         self.train = train
         self.dtype = dtype
         self.one_hot = one_hot
@@ -62,7 +60,7 @@ class MNIST(Dataset[tuple[np.ndarray, np.ndarray]]):
         self.labels = one_hot_fn(labels, 10) if one_hot else labels
         self.images = self.as_dtype(images)
 
-        self.rand = np.random.RandomState(0)
+        super().__init__([self.labels, self.images])
 
     def as_dtype(self, images: np.ndarray) -> np.ndarray:
         if self.dtype == "int8":
@@ -71,13 +69,3 @@ class MNIST(Dataset[tuple[np.ndarray, np.ndarray]]):
             return images.astype(np.float32) / 255.0
         else:
             raise ValueError(f"Unknown dtype: {self.dtype}")
-
-    def worker_init(self, worker_id: int, num_workers: int) -> None:
-        self.images = worker_chunk(self.images, worker_id, num_workers)
-        self.labels = worker_chunk(self.labels, worker_id, num_workers)
-
-    def next(self) -> tuple[np.ndarray, np.ndarray]:
-        index = self.rand.randint(0, len(self.images))
-        image = self.images[index]
-        label = self.labels[index]
-        return image, label
