@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass
 from queue import Queue
-from typing import Generic, Iterator, Sequence, TypeVar
+from typing import Callable, Generic, Iterator, Sequence, TypeVar
 
 import numpy as np
 
@@ -21,11 +21,12 @@ from dpshdl.utils import TextBlock, configure_logging, render_text_blocks
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar("T")
+T = TypeVar("T")  # The type of the dataset item.
+Tc = TypeVar("Tc")  # The type of the collated item.
 Tarrays = TypeVar("Tarrays", bound=tuple[np.ndarray, ...])
 
 
-class Dataset(Iterator[T], Generic[T], ABC):
+class Dataset(Iterator[T], Generic[T, Tc], ABC):
     """Defines the dataset interface.
 
     Datasets are analogous to a PyTorch iterable datasets that iterates
@@ -51,7 +52,18 @@ class Dataset(Iterator[T], Generic[T], ABC):
             The next item in the dataset.
         """
 
-    def __iter__(self) -> "Dataset[T]":
+    @abstractmethod
+    def collate(self, items: list[T]) -> Tc:
+        """Collates  a list of items into a single item.
+
+        Args:
+            items: The items in a batch.
+
+        Returns:
+            The collated items.
+        """
+
+    def __iter__(self) -> "Dataset[T, Tc]":
         # Don't override this! Use `worker_init` instead.
         return self
 
@@ -101,7 +113,7 @@ class Dataset(Iterator[T], Generic[T], ABC):
         logger.info("Tested %d samples in %f seconds (%f samples per second)", i + 1, elapsed_time, samples_per_second)
 
 
-class TensorDataset(Dataset[Tarrays], Generic[Tarrays]):
+class TensorDataset(Dataset[Tarrays, Tarrays], Generic[Tarrays]):
     """Defines a dataset that yields samples from a tensor.
 
     All provided tensors should have the same shape in the ``dim`` dimension.
@@ -109,12 +121,16 @@ class TensorDataset(Dataset[Tarrays], Generic[Tarrays]):
     Parameters:
         tensors: The tensors to sample from.
         dim: The dimension to sample from.
+        stack_dim: The dimension to stack the tensors on.
     """
 
-    def __init__(self, *tensors: np.ndarray, dim: int = 0) -> None:
+    def __init__(self, *tensors: np.ndarray, dim: int = 0, stack_dim: int = 0) -> None:
         super().__init__()
 
         self.tensors = tensors
+        self.dim = dim
+        self.stack_dim = stack_dim
+
         self._worker_tensors = list(tensors)
 
         # Gets the number of samples.
@@ -131,8 +147,12 @@ class TensorDataset(Dataset[Tarrays], Generic[Tarrays]):
         index = self.rand.randint(0, self.num_samples)
         return tuple(np.take(t, index, axis=0) for t in self._worker_tensors)  # type: ignore[return-value]
 
+    def collate(self, items: list[Tarrays]) -> Tarrays:
+        collated_items = (np.stack([item[i] for item in items]) for i in range(len(items[0])))
+        return tuple(collated_items)  # type: ignore[return-value]
 
-class ChunkedDataset(Dataset[T], Generic[T], ABC):
+
+class ChunkedDataset(Dataset[T, Tc], Generic[T, Tc], ABC):
     """Defines a dataset that yields chunks of samples in a separate thread.
 
     This dataset is useful for implementing IO bound datasets such as
@@ -205,17 +225,19 @@ class ChunkedDataset(Dataset[T], Generic[T], ABC):
         return self.next_chunk_queue.get()
 
 
-class RoundRobinDataset(Dataset[T], Generic[T]):
+class RoundRobinDataset(Dataset[T, Tc], Generic[T, Tc]):
     """Defines a dataset that yields samples in round robin fashion.
 
     Parameters:
         datasets: The datasets to sample from.
     """
 
-    def __init__(self, datasets: Sequence[Dataset[T]]) -> None:
+    def __init__(self, datasets: Sequence[Dataset[T, Tc]], collate_fn: Callable[[list[T]], Tc]) -> None:
         super().__init__()
 
         self.datasets = datasets
+        self.collate_fn = collate_fn
+
         self.i = 0
 
     def worker_init(self, worker_id: int, num_workers: int) -> None:
@@ -227,8 +249,11 @@ class RoundRobinDataset(Dataset[T], Generic[T]):
         self.i = (self.i + 1) % len(self.datasets)
         return next_item
 
+    def collate(self, items: list[T]) -> Tc:
+        return self.collate_fn(items)
 
-class RandomDataset(Dataset[T], Generic[T]):
+
+class RandomDataset(Dataset[T, Tc], Generic[T, Tc]):
     """Defines a dataset that randomly samples from a list of datasets.
 
     Parameters:
@@ -237,12 +262,14 @@ class RandomDataset(Dataset[T], Generic[T]):
 
     def __init__(
         self,
-        datasets: Sequence[Dataset[T]],
+        datasets: Sequence[Dataset[T, Tc]],
+        collate_fn: Callable[[list[T]], Tc],
         stop_on_first: bool = False,
     ) -> None:
         super().__init__()
 
         self.datasets = datasets
+        self.collate_fn = collate_fn
         self.stop_on_first = stop_on_first
 
     def worker_init(self, worker_id: int, num_workers: int) -> None:
@@ -251,6 +278,9 @@ class RandomDataset(Dataset[T], Generic[T]):
 
     def next(self) -> T:
         return random.choice(self.datasets).next()
+
+    def collate(self, items: list[T]) -> Tc:
+        return self.collate_fn(items)
 
 
 def get_loc(num_excs: int = 1) -> str:
@@ -401,7 +431,7 @@ class ExceptionSummaryWriter:
         return str(self.summary())
 
 
-class ErrorHandlingDataset(Dataset[T]):
+class ErrorHandlingDataset(Dataset[T, Tc]):
     """Defines a wrapper for safely handling errors in iterable datasets.
 
     Parameters:
@@ -421,7 +451,7 @@ class ErrorHandlingDataset(Dataset[T]):
 
     def __init__(
         self,
-        dataset: Dataset[T],
+        dataset: Dataset[T, Tc],
         sleep_backoff: float = 0.1,
         sleep_backoff_power: float = 2.0,
         maximum_exceptions: int = 10,
@@ -479,3 +509,6 @@ class ErrorHandlingDataset(Dataset[T]):
                 time.sleep(backoff_time)
                 backoff_time *= self.sleep_backoff_power
         raise RuntimeError(f"Reached max exceptions {self.maximum_exceptions}\n{self.exc_summary.summary()}")
+
+    def collate(self, items: list[T]) -> Tc:
+        return self.dataset.collate(items)

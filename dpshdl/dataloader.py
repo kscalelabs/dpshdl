@@ -15,7 +15,7 @@ from multiprocessing.context import BaseContext
 from queue import Queue
 from threading import Event
 from types import TracebackType
-from typing import Generic, Self, TypeVar
+from typing import Callable, Generic, Self, TypeVar
 
 from dpshdl.dataset import Dataset
 
@@ -31,7 +31,7 @@ class DataloaderItem(Generic[T]):
 
 
 def dataloader_worker(
-    dataset: Dataset[T],
+    dataset: Dataset[T, Tc],
     queue: "Queue[DataloaderItem[T]]",
     stop_event: Event,
     worker_id: int,
@@ -50,6 +50,33 @@ def dataloader_worker(
             break
 
 
+def collate_worker(
+    samples_queue: "Queue[DataloaderItem[T]]",
+    collated_queue: "Queue[DataloaderItem[Tc]]",
+    collate_fn: Callable[[list[T]], Tc],
+    stop_event: Event,
+    batch_size: int,
+) -> None:
+    samples: list[T] = []
+    while True:
+        if stop_event.is_set():
+            return
+        try:
+            sample = samples_queue.get()
+            if sample.exception is not None:
+                collated_queue.put(DataloaderItem(None, sample.exception, sample.worker_id))
+                break
+            if sample.item is None:
+                raise RuntimeError("`item` should not be `None` unless there was an exception")
+            samples.append(sample.item)
+            if len(samples) == batch_size:
+                collated_queue.put(DataloaderItem(collate_fn(samples), None, -1))
+                samples = []
+        except BaseException as e:
+            collated_queue.put(DataloaderItem(None, e, -1))
+            break
+
+
 def default_num_workers(default: int) -> int:
     if hasattr(os, "sched_getaffinity"):
         try:
@@ -61,11 +88,7 @@ def default_num_workers(default: int) -> int:
     return default
 
 
-def no_collate(x: list[T]) -> list[T]:
-    return x
-
-
-class Dataloader(Generic[T]):
+class Dataloader(Generic[T, Tc]):
     """Defines a dataloader for loading data from a dataset.
 
     Usage:
@@ -78,6 +101,7 @@ class Dataloader(Generic[T]):
 
     Parameters:
         dataset: The dataset to load data from.
+        collate_fn: The function to use to collate the samples into a batch.
         num_workers: The number of workers to use. If 0, the dataset will be
             loaded on the main process. Otherwise, the dataset will be loaded
             on a pool of workers. If not provided, it will default to the
@@ -90,7 +114,7 @@ class Dataloader(Generic[T]):
 
     def __init__(
         self,
-        dataset: Dataset[T],
+        dataset: Dataset[T, Tc],
         num_workers: int | None = None,
         batch_size: int = 1,
         prefetch_factor: int = 2,
@@ -114,66 +138,93 @@ class Dataloader(Generic[T]):
         self.manager = self.ctx.Manager()
 
         self.processes: list[mp.Process] | None = None
-        self.single_process_thread: threading.Thread | None = None
-        self.queue: Queue[DataloaderItem[T]] = self.manager.Queue(maxsize=batch_size * prefetch_factor)
+        self.single_process_threads: tuple[threading.Thread, threading.Thread] | None = None
+        self.samples_queue: Queue[DataloaderItem[T]] = self.manager.Queue(maxsize=batch_size * prefetch_factor)
+        self.collate_queue: Queue[DataloaderItem[Tc]] = self.manager.Queue(maxsize=prefetch_factor)
         self.stop_event: Event = self.manager.Event()
 
-    def __iter__(self) -> "Dataloader[T]":
+    def __iter__(self) -> "Dataloader[T, Tc]":
         return self
 
-    def __next__(self) -> list[T]:
-        if self.processes is None and self.single_process_thread is None:
+    def __next__(self) -> Tc:
+        if self.processes is None and self.single_process_threads is None:
             raise RuntimeError("Dataloader is not running")
-        items: list[T] = []
-        while len(items) < self.batch_size:
-            item = self.queue.get()
-            if item.exception is not None:
-                raise item.exception
-            assert item.item is not None, "`item` should not be `None` unless there was an exception"
-            items.append(item.item)
-        return items
+        item = self.collate_queue.get()
+        if item.exception:
+            raise item.exception
+        if item.item is None:
+            raise RuntimeError("`item` should not be `None` unless there was an exception")
+        return item.item
 
     def __enter__(self) -> Self:
-        if self.processes is None and self.single_process_thread is None:
+        if self.processes is None and self.single_process_threads is None:
             if self.num_workers > 0:
                 self.processes = []
                 for i in range(self.num_workers):
                     process = mp.Process(
                         target=dataloader_worker,
-                        args=(self.dataset, self.queue, self.stop_event, i, self.num_workers),
+                        args=(self.dataset, self.samples_queue, self.stop_event, i, self.num_workers),
                         daemon=True,
                         name=f"dataloader-worker-{i}",
                     )
                     process.start()
                     self.processes.append(process)
-            else:
-                self.single_process_thread = threading.Thread(
-                    target=dataloader_worker,
-                    args=(self.dataset, self.queue, self.stop_event, 0, 1),
+                collate_process = mp.Process(
+                    target=collate_worker,
+                    args=(
+                        self.samples_queue,
+                        self.collate_queue,
+                        self.dataset.collate,
+                        self.stop_event,
+                        self.batch_size,
+                    ),
                 )
-                self.single_process_thread.start()
+                collate_process.start()
+                self.processes.append(collate_process)
+            else:
+                dataloader_thread = threading.Thread(
+                    target=dataloader_worker,
+                    args=(self.dataset, self.samples_queue, self.stop_event, 0, 1),
+                )
+                dataloader_thread.start()
+                collate_thread = threading.Thread(
+                    target=collate_worker,
+                    args=(
+                        self.samples_queue,
+                        self.collate_queue,
+                        self.dataset.collate,
+                        self.stop_event,
+                        self.batch_size,
+                    ),
+                )
+                collate_thread.start()
+                self.single_process_threads = (dataloader_thread, collate_thread)
         else:
             raise RuntimeError("Dataloader is already running")
         return self
 
     def __exit__(self, _t: type[BaseException] | None, _e: BaseException | None, _tr: TracebackType | None) -> None:
-        if self.processes is None and self.single_process_thread is None:
+        if self.processes is None and self.single_process_threads is None:
             raise RuntimeError("DataLoader is not running")
 
         # Stops the dataloader workers by setting the stop event and clearing
         # the queue. Clearing the queue is important because otherwise the
         # workers will block while trying to put items on the queue.
         self.stop_event.set()
-        while not self.queue.empty():
-            self.queue.get()
+        while not self.samples_queue.empty():
+            self.samples_queue.get()
+        while not self.collate_queue.empty():
+            self.collate_queue.get()
 
         # Joins the dataloader workers.
         if self.processes is not None:
             for process in self.processes:
                 process.terminate()
             self.processes = None
-        elif self.single_process_thread is not None:
-            self.single_process_thread.join()
+        elif self.single_process_threads is not None:
+            dataloader_thread, collate_thread = self.single_process_threads
+            dataloader_thread.join()
+            collate_thread.join()
             self.single_process_thread = None
         else:
             raise RuntimeError("Unexpected state")
