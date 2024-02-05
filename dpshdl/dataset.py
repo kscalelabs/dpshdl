@@ -9,10 +9,10 @@ import sys
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass
 from queue import Queue
-from typing import Callable, Generic, Iterator, Sequence, TypeVar
+from typing import Callable, Deque, Generic, Iterator, Sequence, TypeVar
 
 import numpy as np
 
@@ -281,6 +281,47 @@ class RandomDataset(Dataset[T, Tc], Generic[T, Tc]):
 
     def collate(self, items: list[T]) -> Tc:
         return self.collate_fn(items)
+
+
+class InMemoeryDataset(Dataset[T, Tc], Generic[T, Tc]):
+    """Repeatedly yields from a pool of samples which are stored in-memory.
+
+    Parameters:
+        dataset: The dataset to draw samples for the pool from.
+        num_samples: The maximum size of the pool.
+        yield_in_order: If True, yield the samples in the order they were
+            drawn from the original dataset, otherwise yield randomly.
+    """
+
+    def __init__(
+        self,
+        dataset: Dataset[T, Tc],
+        num_samples: int,
+        yield_in_order: bool = False,
+    ) -> None:
+        super().__init__()
+
+        self.dataset = dataset
+        self.num_samples = num_samples
+        self.yield_in_order = yield_in_order
+
+        self.pool: Deque[T] = deque()
+
+    def worker_init(self, worker_id: int, num_workers: int) -> None:
+        self.dataset.worker_init(worker_id, num_workers)
+
+    def next(self) -> T:
+        if len(self.pool) < self.num_samples:
+            self.pool.append(self.dataset.next())
+        if self.yield_in_order:
+            item = self.pool[0]
+            self.pool.rotate(-1)
+        else:
+            item = self.pool[random.randint(0, len(self.pool) - 1)]
+        return item
+
+    def collate(self, items: list[T]) -> Tc:
+        return self.dataset.collate(items)
 
 
 def get_loc(num_excs: int = 1) -> str:
