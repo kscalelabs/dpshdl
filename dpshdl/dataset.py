@@ -130,7 +130,7 @@ class TensorDataset(Dataset[Tarrays, Tarrays], Generic[Tarrays]):
             raise ValueError("All tensors must have the same shape in the specified dimension.")
 
     def next(self) -> Tarrays:
-        index = self.rand.randint(0, self.num_samples)
+        index = self.rand.randint(0, self._worker_num_samples)
         return tuple(np.take(t, index, axis=0) for t in self._worker_tensors)  # type: ignore[return-value]
 
     def collate(self, items: list[Tarrays]) -> Tarrays:
