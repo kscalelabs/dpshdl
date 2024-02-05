@@ -1,10 +1,8 @@
 """Defines an interface for loading data."""
 
 import bdb
-import itertools
 import logging
 import random
-import re
 import sys
 import threading
 import time
@@ -13,11 +11,12 @@ from collections import Counter, deque
 from dataclasses import dataclass
 from queue import Queue
 from typing import Callable, Deque, Generic, Iterator, Sequence, TypeVar
-from dpshdl.testing import run_test
+
 import numpy as np
 
 from dpshdl.numpy import worker_chunk
-from dpshdl.utils import TextBlock, configure_logging, render_text_blocks
+from dpshdl.testing import run_test
+from dpshdl.utils import TextBlock, render_text_blocks
 
 logger = logging.getLogger(__name__)
 
