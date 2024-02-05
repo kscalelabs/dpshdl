@@ -2,13 +2,13 @@
 
 __version__ = "0.0.2"
 
-from .collate import CollateMode, collate, collate_non_null
-from .dataloader import Dataloader, DataloaderItem
-from .dataset import ChunkedDataset, Dataset, ErrorHandlingDataset, RandomDataset, RoundRobinDataset, TensorDataset
-from .experiments import FileDownloader, check_md5, check_sha256
-from .impl.mnist import MNIST
-from .numpy import one_hot, partial_flatten, worker_chunk
-from .prefetcher import Prefetcher
+from ._collate import CollateMode, collate, collate_non_null
+from ._dataloader import Dataloader, DataloaderItem
+from ._dataset import ChunkedDataset, Dataset, ErrorHandlingDataset, RandomDataset, RoundRobinDataset, TensorDataset
+from ._experiments import FileDownloader, check_md5, check_sha256
+from ._impl.mnist import MNIST
+from ._numpy import one_hot, partial_flatten, worker_chunk
+from ._prefetcher import Prefetcher
 from .utils import (
     COLOR_INDEX,
     Color,

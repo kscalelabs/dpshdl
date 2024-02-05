@@ -16,7 +16,7 @@ from typing import Callable, Generic, Iterator, Sequence, TypeVar
 
 import numpy as np
 
-from dpshdl.numpy import worker_chunk
+from dpshdl._numpy import worker_chunk
 from dpshdl.utils import TextBlock, configure_logging, render_text_blocks
 
 logger = logging.getLogger(__name__)
