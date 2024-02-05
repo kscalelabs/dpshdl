@@ -13,7 +13,7 @@ from collections import Counter, deque
 from dataclasses import dataclass
 from queue import Queue
 from typing import Callable, Deque, Generic, Iterator, Sequence, TypeVar
-
+from dpshdl.testing import run_test
 import numpy as np
 
 from dpshdl.numpy import worker_chunk
@@ -92,25 +92,12 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
             replace_whitespace: If set, replaces whitespace characters with
                 spaces.
         """
-        configure_logging()
         ds = (
             ErrorHandlingDataset(self, flush_every_n_steps=max_samples, flush_every_n_seconds=None)
             if handle_errors
             else self
         )
-        start_time = time.time()
-        ws_regex = re.compile(r"\s+") if replace_whitespace else None
-        for i, sample in enumerate(itertools.islice(ds, max_samples)):
-            if log_interval is not None and i % log_interval == 0:
-                sample_str = str(sample)
-                if ws_regex is not None:
-                    sample_str = ws_regex.sub(" ", sample_str)
-                if truncate is not None and len(sample_str) > truncate:
-                    sample_str = sample_str[: truncate - 3] + "..."
-                logger.info("Sample %d: %s", i, sample_str)
-        elapsed_time = time.time() - start_time
-        samples_per_second = i / elapsed_time
-        logger.info("Tested %d samples in %f seconds (%f samples per second)", i + 1, elapsed_time, samples_per_second)
+        run_test(ds, max_samples, log_interval, truncate, replace_whitespace)
 
 
 class TensorDataset(Dataset[Tarrays, Tarrays], Generic[Tarrays]):
@@ -135,6 +122,7 @@ class TensorDataset(Dataset[Tarrays, Tarrays], Generic[Tarrays]):
 
         # Gets the number of samples.
         self.num_samples = tensors[0].shape[dim]
+        self._worker_num_samples = self.num_samples
         if not all(t.shape[dim] == self.num_samples for t in tensors):
             raise ValueError("All tensors must have the same shape in the specified dimension.")
 
@@ -142,6 +130,9 @@ class TensorDataset(Dataset[Tarrays, Tarrays], Generic[Tarrays]):
 
     def worker_init(self, worker_id: int, num_workers: int) -> None:
         self._worker_tensors = [worker_chunk(t, worker_id, num_workers) for t in self.tensors]
+        self._worker_num_samples = self._worker_tensors[0].shape[self.dim]
+        if not all(t.shape[self.dim] == self._worker_num_samples for t in self._worker_tensors):
+            raise ValueError("All tensors must have the same shape in the specified dimension.")
 
     def next(self) -> Tarrays:
         index = self.rand.randint(0, self.num_samples)

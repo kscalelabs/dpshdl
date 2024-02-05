@@ -7,6 +7,7 @@ as lists. The user is responsible for performing any additional downstream
 tasks like collation.
 """
 
+import logging
 import multiprocessing as mp
 import os
 import threading
@@ -18,6 +19,9 @@ from types import TracebackType
 from typing import Callable, Generic, Self, TypeVar
 
 from dpshdl.dataset import Dataset
+from dpshdl.testing import run_test
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 Tc = TypeVar("Tc")
@@ -142,6 +146,26 @@ class Dataloader(Generic[T, Tc]):
         self.samples_queue: Queue[DataloaderItem[T]] = self.manager.Queue(maxsize=batch_size * prefetch_factor)
         self.collate_queue: Queue[DataloaderItem[Tc]] = self.manager.Queue(maxsize=prefetch_factor)
         self.stop_event: Event = self.manager.Event()
+
+    def test(
+        self,
+        max_samples: int = 10,
+        log_interval: int | None = 1,
+        truncate: int | None = 80,
+        replace_whitespace: bool = True,
+    ) -> None:
+        """Defines a function for doing adhoc testing of the dataset.
+
+        Args:
+            max_samples: The maximum number of samples to test.
+            log_interval: How often to log a sample. If None, don't log any
+                samples.
+            truncate: The maximum number of characters to show in a sample.
+                If None, shows the entire sample.
+            replace_whitespace: If set, replaces whitespace characters with
+                spaces.
+        """
+        run_test(self, max_samples, log_interval, truncate, replace_whitespace)
 
     def __iter__(self) -> "Dataloader[T, Tc]":
         return self
