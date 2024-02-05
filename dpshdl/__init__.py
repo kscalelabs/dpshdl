@@ -8,6 +8,7 @@ from .dataset import ChunkedDataset, Dataset, ErrorHandlingDataset, RandomDatase
 from .experiments import FileDownloader, check_md5, check_sha256
 from .impl.mnist import MNIST
 from .numpy import one_hot, partial_flatten, worker_chunk
+from .prefetcher import Prefetcher
 from .utils import (
     COLOR_INDEX,
     Color,

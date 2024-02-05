@@ -59,5 +59,5 @@ def test_chunked_dataset() -> None:
 
 
 if __name__ == "__main__":
-    # python -m tests.utils.test_dataset
+    # python -m tests.test_dataset
     test_round_robin_dataset()
