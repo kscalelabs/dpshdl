@@ -6,6 +6,7 @@ slow, so it is beneficial to pre-load the next sample into device memory while
 the current sample is being processed.
 """
 
+from types import TracebackType
 from typing import Any, Callable, Generic, Iterable, Iterator, TypeVar
 
 from dpshdl.dataloader import Dataloader
@@ -31,3 +32,10 @@ class Prefetcher(Iterable[Tc_co], Generic[Tc_co]):
         while True:
             yield sample
             sample, next_sample = next_sample, self.get_sample()
+
+    def __enter__(self) -> "Prefetcher[Tc_co]":
+        self.dataloader.__enter__()
+        return self
+
+    def __exit__(self, _t: type[BaseException] | None, _e: BaseException | None, _tr: TracebackType | None) -> None:
+        self.dataloader.__exit__(_t, _e, _tr)
