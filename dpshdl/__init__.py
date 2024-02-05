@@ -1,6 +1,6 @@
 """Defines the top-level dataload API."""
 
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 
 from ._collate import CollateMode, collate, collate_non_null
 from ._dataloader import Dataloader, DataloaderItem
