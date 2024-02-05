@@ -15,7 +15,7 @@ from typing import Callable, Deque, Generic, Iterator, Sequence, TypeVar
 import numpy as np
 
 from dpshdl.numpy import worker_chunk
-from dpshdl.testing import run_test
+from dpshdl.testing import print_sample, run_test
 from dpshdl.utils import TextBlock, render_text_blocks
 
 logger = logging.getLogger(__name__)
@@ -75,8 +75,7 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
         max_samples: int = 10,
         handle_errors: bool = False,
         log_interval: int | None = 1,
-        truncate: int | None = 80,
-        replace_whitespace: bool = True,
+        print_fn: Callable[[int, T], None] = print_sample,
     ) -> None:
         """Defines a function for doing adhoc testing of the dataset.
 
@@ -86,17 +85,14 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
                 wrapper that will catch and log exceptions.
             log_interval: How often to log a sample. If None, don't log any
                 samples.
-            truncate: The maximum number of characters to show in a sample.
-                If None, shows the entire sample.
-            replace_whitespace: If set, replaces whitespace characters with
-                spaces.
+            print_fn: The function to use for printing samples.
         """
         ds = (
             ErrorHandlingDataset(self, flush_every_n_steps=max_samples, flush_every_n_seconds=None)
             if handle_errors
             else self
         )
-        run_test(ds, max_samples, log_interval, truncate, replace_whitespace)
+        run_test(ds, max_samples, log_interval, print_fn)
 
 
 class TensorDataset(Dataset[Tarrays, Tarrays], Generic[Tarrays]):
