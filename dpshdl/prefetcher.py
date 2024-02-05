@@ -23,15 +23,19 @@ class Prefetcher(Iterable[Tc_co], Generic[Tc_co]):
 
         self.to_device_func = to_device_func
         self.dataloader = dataloader
+        self.next_sample: Tc_co | None = None
 
     def get_sample(self) -> Tc_co:
         return self.to_device_func(next(self.dataloader))
 
     def __iter__(self) -> Iterator[Tc_co]:
-        sample, next_sample = self.get_sample(), self.get_sample()
-        while True:
-            yield sample
-            sample, next_sample = next_sample, self.get_sample()
+        return self
+
+    def __next__(self) -> Tc_co:
+        if self.next_sample is None:
+            self.next_sample = self.get_sample()
+        sample, self.next_sample = self.next_sample, self.get_sample()
+        return sample
 
     def __enter__(self) -> "Prefetcher[Tc_co]":
         self.dataloader.__enter__()
