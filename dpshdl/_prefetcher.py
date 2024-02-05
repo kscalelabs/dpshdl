@@ -9,7 +9,7 @@ the current sample is being processed.
 from types import TracebackType
 from typing import Any, Callable, Generic, Iterable, Iterator, TypeVar
 
-from dpshdl.dataloader import Dataloader
+from dpshdl._dataloader import Dataloader
 
 T = TypeVar("T")
 Tc_co = TypeVar("Tc_co", covariant=True)
