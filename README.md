@@ -13,17 +13,18 @@ pip install dpshdl
 Datasets should override a single method, `next`, which returns a single sample.
 
 ```python
-import dpshdl as dl
+from dpshdl.dataset import Dataset
+from dpshdl.dataloader import Dataloader
 import numpy as np
 
-class MyDataset(dl.Dataset[np.ndarray, np.ndarray]):
+class MyDataset(Dataset[np.ndarray, np.ndarray]):
     def next(self) -> int:
         return 1
 
     def collate(self, items: list[int]) -> np.ndarray:
         return np.array(items)
 
-loader = dl.Dataloader(MyDataset(), batch_size=2)
+loader = Dataloader(MyDataset(), batch_size=2)
 
 # Loops forever.
 for sample in loader:
