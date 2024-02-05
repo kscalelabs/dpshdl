@@ -17,7 +17,7 @@ from threading import Event
 from types import TracebackType
 from typing import Callable, Generic, Self, TypeVar
 
-from dpshdl._dataset import Dataset
+from dpshdl.dataset import Dataset
 
 T = TypeVar("T")
 Tc = TypeVar("Tc")

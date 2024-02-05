@@ -9,9 +9,9 @@ from typing import Literal
 
 import numpy as np
 
-from dpshdl._dataset import TensorDataset
-from dpshdl._experiments import FileDownloader
-from dpshdl._numpy import one_hot as one_hot_fn
+from dpshdl.dataset import TensorDataset
+from dpshdl.experiments import FileDownloader
+from dpshdl.numpy import one_hot as one_hot_fn
 
 logger = logging.getLogger(__name__)
 
