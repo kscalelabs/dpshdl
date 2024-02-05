@@ -4,19 +4,43 @@ import itertools
 import logging
 import re
 import time
-from typing import Iterable
+from typing import Callable, Iterable, TypeVar
 
 from dpshdl.utils import configure_logging
 
 logger = logging.getLogger(__name__)
 
+T = TypeVar("T")
 
-def run_test(
-    ds: Iterable,
-    max_samples: int = 10,
-    log_interval: int | None = 1,
+
+def print_sample(
+    index: int,
+    sample: T,
     truncate: int | None = 80,
     replace_whitespace: bool = True,
+) -> None:
+    """Prints a sample from a dataset.
+
+    Args:
+        index: The index of the sample.
+        sample: The sample to print.
+        truncate: If set, truncates the sample to this length.
+        replace_whitespace: If set, replaces all whitespace with a single
+            space.
+    """
+    sample_str = str(sample)
+    if replace_whitespace:
+        sample_str = re.sub(r"\s+", " ", sample_str)
+    if truncate is not None and len(sample_str) > truncate:
+        sample_str = sample_str[: truncate - 3] + "..."
+    logger.info("Sample %d: %s", index, sample_str)
+
+
+def run_test(
+    ds: Iterable[T],
+    max_samples: int = 10,
+    log_interval: int | None = 1,
+    print_fn: Callable[[int, T], None] = print_sample,
 ) -> None:
     """Defines a function for doing adhoc testing of the dataset.
 
@@ -27,22 +51,13 @@ def run_test(
             wrapper that will catch and log exceptions.
         log_interval: How often to log a sample. If None, don't log any
             samples.
-        truncate: The maximum number of characters to show in a sample.
-            If None, shows the entire sample.
-        replace_whitespace: If set, replaces whitespace characters with
-            spaces.
+        print_fn: The function to use for printing samples.
     """
     configure_logging()
     start_time = time.time()
-    ws_regex = re.compile(r"\s+") if replace_whitespace else None
     for i, sample in enumerate(itertools.islice(ds, max_samples)):
         if log_interval is not None and i % log_interval == 0:
-            sample_str = str(sample)
-            if ws_regex is not None:
-                sample_str = ws_regex.sub(" ", sample_str)
-            if truncate is not None and len(sample_str) > truncate:
-                sample_str = sample_str[: truncate - 3] + "..."
-            logger.info("Sample %d: %s", i, sample_str)
+            print_fn(i, sample)
     elapsed_time = time.time() - start_time
     samples_per_second = i / elapsed_time
     logger.info("Tested %d samples in %f seconds (%f samples per second)", i + 1, elapsed_time, samples_per_second)

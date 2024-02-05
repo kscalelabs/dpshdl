@@ -19,7 +19,7 @@ from types import TracebackType
 from typing import Callable, Generic, Self, TypeVar
 
 from dpshdl.dataset import Dataset
-from dpshdl.testing import run_test
+from dpshdl.testing import print_sample, run_test
 
 logger = logging.getLogger(__name__)
 
@@ -151,8 +151,7 @@ class Dataloader(Generic[T, Tc]):
         self,
         max_samples: int = 10,
         log_interval: int | None = 1,
-        truncate: int | None = 80,
-        replace_whitespace: bool = True,
+        print_fn: Callable[[int, Tc], None] = print_sample,
     ) -> None:
         """Defines a function for doing adhoc testing of the dataset.
 
@@ -160,12 +159,9 @@ class Dataloader(Generic[T, Tc]):
             max_samples: The maximum number of samples to test.
             log_interval: How often to log a sample. If None, don't log any
                 samples.
-            truncate: The maximum number of characters to show in a sample.
-                If None, shows the entire sample.
-            replace_whitespace: If set, replaces whitespace characters with
-                spaces.
+            print_fn: The function to use for printing samples.
         """
-        run_test(self, max_samples, log_interval, truncate, replace_whitespace)
+        run_test(self, max_samples, log_interval, print_fn)
 
     def __iter__(self) -> "Dataloader[T, Tc]":
         return self
