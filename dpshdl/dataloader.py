@@ -241,12 +241,20 @@ class Dataloader(Generic[T, Tc]):
             else:
                 dataloader_thread = threading.Thread(
                     target=dataloader_worker,
-                    args=(self.dataset, self.samples_queue, self.stop_event, 0, 1),
+                    args=(
+                        self.dataloader_worker_init_fn,
+                        self.dataset,
+                        self.samples_queue,
+                        self.stop_event,
+                        0,
+                        1,
+                    ),
                 )
                 dataloader_thread.start()
                 collate_thread = threading.Thread(
                     target=collate_worker,
                     args=(
+                        self.collate_worker_init_fn,
                         self.samples_queue,
                         self.collated_queue,
                         self.dataset.collate,

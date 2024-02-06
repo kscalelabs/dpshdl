@@ -88,3 +88,32 @@ collate(items, pad=True)  # Use the default padding strategy.
 collate(items, pad=functools.partial(pad_all, left_pad=True))  # Left-padding.
 collate(items, pad=functools.partial(pad_sequence, dim=0, left_pad=True))  # Pads a specific dimension.
 ```
+
+### Prefetching
+
+Sometimes it is a good idea to trigger a host-to-device transfer before a batch of samples is needed, so that it can take place asynchronously while other computation is happening. This is called prefetching. This package provides a simple utility class to do this:
+
+```python
+from dpshdl.dataset import Dataset
+from dpshdl.dataloader import Dataloader
+from dpshdl.prefetcher import Prefetcher
+import numpy as np
+import torch
+from torch import Tensor
+
+
+class MyDataset(Dataset[int, np.ndarray]):
+    def next(self) -> int:
+        return 1
+
+
+def to_device_func(sample: np.ndarray) -> Tensor:
+    # Because this is non-blocking, the H2D transfer can take place in the
+    # background while other computation is happening.
+    return torch.from_numpy(sample).to("cuda", non_blocking=True)
+
+
+with Prefetcher(to_device_func, Dataloader(MyDataset(), batch_size=2)) as loader:
+    for sample in loader:
+        assert sample.device.type == "cuda"
+```

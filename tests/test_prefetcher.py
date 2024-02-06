@@ -6,7 +6,7 @@ import random
 import numpy as np
 import pytest
 
-from dpshdl.collate import collate_non_null
+from dpshdl.collate import collate
 from dpshdl.dataloader import Dataloader
 from dpshdl.dataset import Dataset
 from dpshdl.prefetcher import Prefetcher
@@ -20,7 +20,7 @@ class DummyDataset(Dataset[int, np.ndarray]):
         return random.randint(0, 5)
 
     def collate(self, items: list[int]) -> np.ndarray:
-        return collate_non_null(items)
+        return collate(items)
 
 
 def to_device_fn(sample: np.ndarray) -> np.ndarray:
