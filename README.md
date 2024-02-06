@@ -17,7 +17,7 @@ from dpshdl.dataset import Dataset
 from dpshdl.dataloader import Dataloader
 import numpy as np
 
-class MyDataset(Dataset[np.ndarray, np.ndarray]):
+class MyDataset(Dataset[int, np.ndarray]):
     def next(self) -> int:
         return 1
 
