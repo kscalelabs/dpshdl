@@ -53,7 +53,6 @@ def collate_worker_init_fn() -> None:
     init_random(-1)
 
 
-
 def dataloader_worker(
     worker_init_fn: Callable[[int, int], None],
     dataset: Dataset[T, Tc],
