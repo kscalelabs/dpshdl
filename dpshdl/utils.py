@@ -343,9 +343,22 @@ class ColoredFormatter(logging.Formatter):
         use_color: bool = True,
     ) -> None:
         asc_start, asc_end = color_parts("grey")
-        message = "{levelname:^19s} " + asc_start + "{asctime}" + asc_end + " [{name}] {message}"
+        name_start, name_end = color_parts("blue", bold=True)
+        message_pre = [
+            "{levelname:^19s}",
+            asc_start,
+            "{asctime}",
+            asc_end,
+            " [",
+            name_start,
+            "{name}",
+            name_end,
+            "]",
+        ]
+        message_post = [" {message}"]
         if prefix is not None:
-            message = colored(prefix, "white") + " " + message
+            message_pre += [" ", colored(prefix, "magenta", bold=True)]
+        message = "".join(message_pre + message_post)
         super().__init__(message, style="{", datefmt="%Y-%m-%d %H:%M:%S")
 
         self.use_color = use_color
@@ -366,7 +379,7 @@ class ColoredFormatter(logging.Formatter):
         return logging.Formatter.format(self, record)
 
 
-def configure_logging() -> None:
+def configure_logging(prefix: str | None = None) -> None:
     """Instantiates logging.
 
     Args:
@@ -378,7 +391,7 @@ def configure_logging() -> None:
     logging.captureWarnings(True)
 
     stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setFormatter(ColoredFormatter())
+    stream_handler.setFormatter(ColoredFormatter(prefix=prefix))
 
     root_logger.addHandler(stream_handler)
     root_logger.setLevel(logging.INFO)

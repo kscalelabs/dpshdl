@@ -111,7 +111,7 @@ def pad_all(
     return tensors
 
 
-def collate(
+def collate_nullable(
     items: list[Any],
     *,
     mode: CollateMode | Callable[[list[np.ndarray]], np.ndarray] = "stack",
@@ -158,25 +158,25 @@ def collate(
 
     # All images are converted to tensors.
     if PILImage is not None and isinstance(item, PILImage):
-        return collate([np.asarray(i) for i in items], mode=mode, pad=pad)
+        return collate_nullable([np.asarray(i) for i in items], mode=mode, pad=pad)
 
     # Numbers are converted to a list of tensors.
     if isinstance(item, (bool, int, float, complex, np.bool_, np.number)):
-        return collate([np.asarray(i) for i in items], mode=mode, pad=pad)
+        return collate_nullable([np.asarray(i) for i in items], mode=mode, pad=pad)
 
     # Collate dictionaries if they have the same keys.
     if isinstance(item, dict) and all(set(i.keys()) == set(item.keys()) for i in items):
         output_dict = {}
         item_keys = set(item.keys())
         for key in item_keys:
-            output_dict[key] = collate([i[key] for i in items], mode=mode, pad=pad)
+            output_dict[key] = collate_nullable([i[key] for i in items], mode=mode, pad=pad)
         return output_dict
 
     # Collate lists and tuples if they have the same lengths.
     if isinstance(item, (list, tuple)) and all(len(i) == len(item) for i in items):
         output_list = []
         for j in range(len(item)):
-            output_list.append(collate([i[j] for i in items], mode=mode, pad=pad))
+            output_list.append(collate_nullable([i[j] for i in items], mode=mode, pad=pad))
         if is_named_tuple(item):
             return type(item)(*output_list)  # type: ignore[arg-type]
         if isinstance(item, tuple):
@@ -188,19 +188,19 @@ def collate(
         output_dict = {}
         item_keys = item.__dict__.keys()
         for key in item_keys:
-            output_dict[key] = collate([getattr(i, key) for i in items], mode=mode, pad=pad)
+            output_dict[key] = collate_nullable([getattr(i, key) for i in items], mode=mode, pad=pad)
         return item.__class__(**output_dict)
 
     # By default, don't do anything.
     return items
 
 
-def collate_non_null(
+def collate(
     items: list[Any],
     *,
     mode: CollateMode | Callable[[list[np.ndarray]], np.ndarray] = "stack",
     pad: bool | Callable[[list[np.ndarray]], list[np.ndarray]] = False,
 ) -> Any:  # noqa: ANN401
-    collated = collate(items, mode=mode, pad=pad)
+    collated = collate_nullable(items, mode=mode, pad=pad)
     assert collated is not None
     return collated
