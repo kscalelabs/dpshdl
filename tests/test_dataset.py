@@ -5,7 +5,7 @@ from typing import Iterator
 
 import numpy as np
 
-from dpshdl.collate import collate_non_null
+from dpshdl.collate import collate
 from dpshdl.dataset import ChunkedDataset, Dataset, RandomDataset, RoundRobinDataset
 
 
@@ -19,7 +19,7 @@ class DummyDataset(Dataset[int, np.ndarray]):
         return self.value
 
     def collate(self, items: list[int]) -> np.ndarray:
-        return collate_non_null(items)
+        return collate(items)
 
 
 def test_dataset_simple() -> None:
@@ -51,7 +51,7 @@ class DummyChunkedDataset(ChunkedDataset[int, np.ndarray]):
             yield i
 
     def collate(self, items: list[int]) -> np.ndarray:
-        return collate_non_null(items)
+        return collate(items)
 
 
 def test_chunked_dataset() -> None:

@@ -10,6 +10,7 @@ tasks like collation.
 import logging
 import multiprocessing as mp
 import os
+import random
 import threading
 from dataclasses import dataclass
 from multiprocessing.context import BaseContext
@@ -18,8 +19,11 @@ from threading import Event
 from types import TracebackType
 from typing import Callable, Generic, Self, TypeVar
 
-from dpshdl.dataset import Dataset
+import numpy as np
+
+from dpshdl.dataset import Dataset, ErrorHandlingDataset
 from dpshdl.testing import print_sample, run_test
+from dpshdl.utils import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +38,31 @@ class DataloaderItem(Generic[T]):
     worker_id: int
 
 
+def init_random(worker_id: int = 0) -> None:
+    random.seed(1337 + worker_id)
+    np.random.seed(1337 + worker_id)
+
+
+def dataloader_worker_init_fn(worker_id: int, num_workers: int) -> None:
+    configure_logging(prefix=f"{worker_id}")
+    init_random(worker_id)
+
+
+def collate_worker_init_fn() -> None:
+    configure_logging(prefix="col")
+    init_random(-1)
+
+
+
 def dataloader_worker(
+    worker_init_fn: Callable[[int, int], None],
     dataset: Dataset[T, Tc],
     queue: "Queue[DataloaderItem[T]]",
     stop_event: Event,
     worker_id: int,
     num_workers: int,
 ) -> None:
+    worker_init_fn(worker_id, num_workers)
     dataset.worker_init(worker_id, num_workers)
     dataset_iterator = dataset.__iter__()
     while True:
@@ -55,12 +77,14 @@ def dataloader_worker(
 
 
 def collate_worker(
+    worker_init_fn: Callable[[], None],
     samples_queue: "Queue[DataloaderItem[T]]",
     collated_queue: "Queue[DataloaderItem[Tc]]",
-    collate_fn: Callable[[list[T]], Tc],
+    collate_fn: Callable[[list[T]], Tc | None],
     stop_event: Event,
     batch_size: int,
 ) -> None:
+    worker_init_fn()
     samples: list[T] = []
     while True:
         if stop_event.is_set():
@@ -74,7 +98,8 @@ def collate_worker(
                 raise RuntimeError("`item` should not be `None` unless there was an exception")
             samples.append(sample.item)
             if len(samples) == batch_size:
-                collated_queue.put(DataloaderItem(collate_fn(samples), None, -1))
+                if (collated := collate_fn(samples)) is not None:
+                    collated_queue.put(DataloaderItem(collated, None, -1))
                 samples = []
         except BaseException as e:
             collated_queue.put(DataloaderItem(None, e, -1))
@@ -123,6 +148,8 @@ class Dataloader(Generic[T, Tc]):
         batch_size: int = 1,
         prefetch_factor: int = 2,
         ctx: BaseContext | None = None,
+        dataloader_worker_init_fn: Callable[[int, int], None] = dataloader_worker_init_fn,
+        collate_worker_init_fn: Callable[[], None] = collate_worker_init_fn,
     ) -> None:
         super().__init__()
 
@@ -139,12 +166,14 @@ class Dataloader(Generic[T, Tc]):
         self.num_workers = num_workers
         self.batch_size = batch_size
         self.ctx = mp.get_context() if ctx is None else ctx
+        self.dataloader_worker_init_fn = dataloader_worker_init_fn
+        self.collate_worker_init_fn = collate_worker_init_fn
         self.manager = self.ctx.Manager()
 
         self.processes: list[mp.Process] | None = None
         self.single_process_threads: tuple[threading.Thread, threading.Thread] | None = None
         self.samples_queue: Queue[DataloaderItem[T]] = self.manager.Queue(maxsize=batch_size * prefetch_factor)
-        self.collate_queue: Queue[DataloaderItem[Tc]] = self.manager.Queue(maxsize=prefetch_factor)
+        self.collated_queue: Queue[DataloaderItem[Tc]] = self.manager.Queue(maxsize=prefetch_factor)
         self.stop_event: Event = self.manager.Event()
 
     def test(
@@ -161,7 +190,8 @@ class Dataloader(Generic[T, Tc]):
                 samples.
             print_fn: The function to use for printing samples.
         """
-        run_test(self, max_samples, log_interval, print_fn)
+        with self:
+            run_test(self, max_samples, log_interval, print_fn)
 
     def __iter__(self) -> "Dataloader[T, Tc]":
         return self
@@ -169,7 +199,7 @@ class Dataloader(Generic[T, Tc]):
     def __next__(self) -> Tc:
         if self.processes is None and self.single_process_threads is None:
             raise RuntimeError("Dataloader is not running")
-        item = self.collate_queue.get()
+        item = self.collated_queue.get()
         if item.exception:
             raise item.exception
         if item.item is None:
@@ -183,7 +213,14 @@ class Dataloader(Generic[T, Tc]):
                 for i in range(self.num_workers):
                     process = mp.Process(
                         target=dataloader_worker,
-                        args=(self.dataset, self.samples_queue, self.stop_event, i, self.num_workers),
+                        args=(
+                            self.dataloader_worker_init_fn,
+                            self.dataset,
+                            self.samples_queue,
+                            self.stop_event,
+                            i,
+                            self.num_workers,
+                        ),
                         daemon=True,
                         name=f"dataloader-worker-{i}",
                     )
@@ -192,8 +229,9 @@ class Dataloader(Generic[T, Tc]):
                 collate_process = mp.Process(
                     target=collate_worker,
                     args=(
+                        self.collate_worker_init_fn,
                         self.samples_queue,
-                        self.collate_queue,
+                        self.collated_queue,
                         self.dataset.collate,
                         self.stop_event,
                         self.batch_size,
@@ -211,7 +249,7 @@ class Dataloader(Generic[T, Tc]):
                     target=collate_worker,
                     args=(
                         self.samples_queue,
-                        self.collate_queue,
+                        self.collated_queue,
                         self.dataset.collate,
                         self.stop_event,
                         self.batch_size,
@@ -233,8 +271,8 @@ class Dataloader(Generic[T, Tc]):
         self.stop_event.set()
         while not self.samples_queue.empty():
             self.samples_queue.get()
-        while not self.collate_queue.empty():
-            self.collate_queue.get()
+        while not self.collated_queue.empty():
+            self.collated_queue.get()
 
         # Joins the dataloader workers.
         if self.processes is not None:
@@ -248,3 +286,32 @@ class Dataloader(Generic[T, Tc]):
             self.single_process_thread = None
         else:
             raise RuntimeError("Unexpected state")
+
+
+class _DummyDataset(Dataset[int, list[int]]):
+    def next(self) -> int:
+        return random.randint(0, 10)
+
+    def collate(self, items: list[int]) -> list[int]:
+        assert random.random() > 0.1, "A random error"
+        return items
+
+
+def test_error_handling_dataset_adhoc(test_samples: int = 100) -> None:
+    """Tests the error handling dataset."""
+    Dataloader(
+        ErrorHandlingDataset(
+            _DummyDataset(),
+            flush_every_n_steps=test_samples,
+            flush_every_n_seconds=None,
+        ),
+        batch_size=2,
+    ).test(
+        max_samples=test_samples,
+        print_fn=lambda i, sample: logger.info("Sample %d: %s", i, sample),
+    )
+
+
+if __name__ == "__main__":
+    # python -m dpshdl.dataloader
+    test_error_handling_dataset_adhoc()

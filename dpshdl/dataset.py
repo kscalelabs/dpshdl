@@ -14,6 +14,7 @@ from typing import Callable, Deque, Generic, Iterator, Sequence, TypeVar
 
 import numpy as np
 
+from dpshdl.collate import collate
 from dpshdl.numpy import worker_chunk
 from dpshdl.testing import print_sample, run_test
 from dpshdl.utils import TextBlock, render_text_blocks
@@ -51,8 +52,7 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
             The next item in the dataset.
         """
 
-    @abstractmethod
-    def collate(self, items: list[T]) -> Tc:
+    def collate(self, items: list[T]) -> Tc | None:
         """Collates  a list of items into a single item.
 
         Args:
@@ -61,6 +61,7 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
         Returns:
             The collated items.
         """
+        return collate(items)
 
     def __iter__(self) -> "Dataset[T, Tc]":
         # Don't override this! Use `worker_init` instead.
@@ -218,7 +219,7 @@ class RoundRobinDataset(Dataset[T, Tc], Generic[T, Tc]):
         datasets: The datasets to sample from.
     """
 
-    def __init__(self, datasets: Sequence[Dataset[T, Tc]], collate_fn: Callable[[list[T]], Tc]) -> None:
+    def __init__(self, datasets: Sequence[Dataset[T, Tc]], collate_fn: Callable[[list[T]], Tc | None]) -> None:
         super().__init__()
 
         self.datasets = datasets
@@ -235,7 +236,7 @@ class RoundRobinDataset(Dataset[T, Tc], Generic[T, Tc]):
         self.i = (self.i + 1) % len(self.datasets)
         return next_item
 
-    def collate(self, items: list[T]) -> Tc:
+    def collate(self, items: list[T]) -> Tc | None:
         return self.collate_fn(items)
 
 
@@ -249,7 +250,7 @@ class RandomDataset(Dataset[T, Tc], Generic[T, Tc]):
     def __init__(
         self,
         datasets: Sequence[Dataset[T, Tc]],
-        collate_fn: Callable[[list[T]], Tc],
+        collate_fn: Callable[[list[T]], Tc | None],
         stop_on_first: bool = False,
     ) -> None:
         super().__init__()
@@ -265,11 +266,11 @@ class RandomDataset(Dataset[T, Tc], Generic[T, Tc]):
     def next(self) -> T:
         return random.choice(self.datasets).next()
 
-    def collate(self, items: list[T]) -> Tc:
+    def collate(self, items: list[T]) -> Tc | None:
         return self.collate_fn(items)
 
 
-class InMemoeryDataset(Dataset[T, Tc], Generic[T, Tc]):
+class InMemoryDataset(Dataset[T, Tc], Generic[T, Tc]):
     """Repeatedly yields from a pool of samples which are stored in-memory.
 
     Parameters:
@@ -306,7 +307,7 @@ class InMemoeryDataset(Dataset[T, Tc], Generic[T, Tc]):
             item = self.pool[random.randint(0, len(self.pool) - 1)]
         return item
 
-    def collate(self, items: list[T]) -> Tc:
+    def collate(self, items: list[T]) -> Tc | None:
         return self.dataset.collate(items)
 
 
@@ -474,6 +475,7 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
             exception traceback.
         flush_every_n_steps: Flush the exception summary every N steps.
         flush_every_n_seconds: Flush the exception summary every N seconds.
+        log_exceptions_all_workers: If set, log exceptions from all workers.
     """
 
     def __init__(
@@ -486,6 +488,7 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
         traceback_depth: int = 3,
         flush_every_n_steps: int | None = None,
         flush_every_n_seconds: float | None = 60.0,
+        log_exceptions_all_workers: bool = False,
     ) -> None:
         super().__init__()
 
@@ -497,9 +500,11 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
         self.traceback_depth = traceback_depth
         self.flush_every_n_steps = flush_every_n_steps
         self.flush_every_n_seconds = flush_every_n_seconds
+        self.log_exceptions_all_workers = log_exceptions_all_workers
         self.log_exceptions = True
 
         self.exc_summary = ExceptionSummaryWriter()
+        self.col_exc_summary = ExceptionSummaryWriter()
 
     def should_flush_summary(self) -> bool:
         if self.flush_every_n_steps is not None and self.exc_summary.num_steps >= self.flush_every_n_steps:
@@ -508,9 +513,16 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
             return True
         return False
 
+    def should_flush_col_summary(self) -> bool:
+        if self.flush_every_n_steps is not None and self.col_exc_summary.num_steps >= self.flush_every_n_steps:
+            return True
+        if self.flush_every_n_seconds is not None and self.col_exc_summary.elapsed_time >= self.flush_every_n_seconds:
+            return True
+        return False
+
     def worker_init(self, worker_id: int, num_workers: int) -> None:
         self.dataset.worker_init(worker_id, num_workers)
-        if worker_id != 0:
+        if worker_id != 0 and not self.log_exceptions_all_workers:
             self.log_exceptions = False
 
     def next(self) -> T:
@@ -537,5 +549,47 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
                 backoff_time *= self.sleep_backoff_power
         raise RuntimeError(f"Reached max exceptions {self.maximum_exceptions}\n{self.exc_summary.summary()}")
 
-    def collate(self, items: list[T]) -> Tc:
-        return self.dataset.collate(items)
+    def collate(self, items: list[T]) -> Tc | None:
+        self.col_exc_summary.next()
+
+        if self.should_flush_col_summary():
+            if self.log_exceptions and self.col_exc_summary:
+                logger.info("Exception summary:\n%s", self.col_exc_summary.summary())
+            self.col_exc_summary.clear()
+
+        try:
+            return self.dataset.collate(items)
+        except (bdb.BdbQuit, KeyboardInterrupt, StopIteration):
+            raise
+        except Exception as e:
+            self.col_exc_summary.add_exception(e, get_loc(self.traceback_depth))
+            return None
+
+
+def test_error_handling_dataset_adhoc() -> None:
+    """Tests the error handling dataset."""
+
+    class DummyDataset(Dataset[int, list[int]]):
+        def next(self) -> int:
+            n = random.random()
+            if n < 0.1:
+                assert False
+            elif n < 0.2:
+                raise ValueError("ValueError")
+            elif n < 0.3:
+                1 / 0
+            return random.randint(0, 10)
+
+        def collate(self, items: list[int]) -> list[int]:
+            return items
+
+    DummyDataset().test(
+        max_samples=100,
+        handle_errors=True,
+        print_fn=lambda i, sample: logger.info("Sample %d: %d", i, sample),
+    )
+
+
+if __name__ == "__main__":
+    # python -m dpshdl.dataset
+    test_error_handling_dataset_adhoc()
