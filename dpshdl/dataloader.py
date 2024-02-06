@@ -235,6 +235,7 @@ class Dataloader(Generic[T, Tc]):
                         self.stop_event,
                         self.batch_size,
                     ),
+                    name="dataloader-worker-collate",
                 )
                 collate_process.start()
                 self.processes.append(collate_process)
