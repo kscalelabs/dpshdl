@@ -3,6 +3,7 @@
 import bdb
 import logging
 import random
+import re
 import sys
 import threading
 import time
@@ -77,6 +78,9 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
         handle_errors: bool = False,
         log_interval: int | None = 1,
         print_fn: Callable[[int, T], None] = print_sample,
+        batch_fn: Callable[[list[int], list[T]], None] | None = None,
+        batch_size: int | None = None,
+        log_batch_interval: int | None = 1,
     ) -> None:
         """Defines a function for doing adhoc testing of the dataset.
 
@@ -87,13 +91,45 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
             log_interval: How often to log a sample. If None, don't log any
                 samples.
             print_fn: The function to use for printing samples.
+            batch_fn: The function to use for printing batches.
+            batch_size: Call the ``batch_fn`` on batches of this size.
+            log_batch_interval: Log a batch after this many batches.
         """
         ds = (
-            ErrorHandlingDataset(self, flush_every_n_steps=max_samples, flush_every_n_seconds=None)
+            ErrorHandlingDataset(
+                self,
+                flush_every_n_steps=max_samples,
+                flush_every_n_seconds=None,
+            )
             if handle_errors
             else self
         )
-        run_test(ds, max_samples, log_interval, print_fn)
+
+        if batch_fn is None:
+
+            def batch_fn(
+                indices: list[int],
+                samples: list[T],
+                truncate: int | None = 80,
+                replace_whitespace: bool = True,
+            ) -> None:
+                batch = ds.collate(samples)
+                batch_str = str(batch)
+                if replace_whitespace:
+                    batch_str = re.sub(r"\s+", " ", batch_str)
+                if truncate is not None and len(batch_str) > truncate:
+                    batch_str = batch_str[: truncate - 3] + "..."
+                logger.info("Samples %d - %d: %s", indices[0], indices[-1], batch_str)
+
+        run_test(
+            ds=ds,
+            max_samples=max_samples,
+            log_interval=log_interval,
+            print_fn=print_fn,
+            batch_fn=batch_fn,
+            batch_size=batch_size,
+            log_batch_interval=log_batch_interval,
+        )
 
 
 class TensorDataset(Dataset[Tarrays, Tarrays], Generic[Tarrays]):
@@ -339,6 +375,7 @@ def get_loc(num_excs: int = 1) -> str:
 
 @dataclass(frozen=True)
 class ExceptionSummary:
+    title: str
     num_steps: int
     elapsed_time: float
     num_exceptions: int
@@ -353,7 +390,7 @@ class ExceptionSummary:
         blocks += [
             [
                 TextBlock(
-                    f"Error Summary ({self.num_steps} steps, {self.elapsed_time:.2f} seconds)",
+                    f"{self.title} ({self.num_steps} steps, {self.elapsed_time:.2f} seconds)",
                     color="red",
                     bold=True,
                     width=60,
@@ -407,12 +444,14 @@ class ExceptionSummaryWriter:
     """Defines a utility class for storing and logging exceptions.
 
     Parameters:
+        title: The title for each summary.
         max_exceptions: The maximum number of unique exceptions to log.
     """
 
-    def __init__(self, max_exceptions: int = 10) -> None:
+    def __init__(self, title: str, max_exceptions: int = 10) -> None:
         super().__init__()
 
+        self.title = title
         self.max_exceptions = max_exceptions
 
         self.exceptions: Counter[str] = Counter()
@@ -450,6 +489,7 @@ class ExceptionSummaryWriter:
 
     def summary(self) -> ExceptionSummary:
         return ExceptionSummary(
+            title=self.title,
             num_steps=self.num_steps,
             elapsed_time=self.elapsed_time,
             num_exceptions=self.total_exceptions,
@@ -517,8 +557,8 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
         self.log_exceptions_all_workers = log_exceptions_all_workers
         self.log_exceptions = True
 
-        self.exc_summary = ExceptionSummaryWriter()
-        self.col_exc_summary = ExceptionSummaryWriter()
+        self.exc_summary = ExceptionSummaryWriter("Error Summary")
+        self.col_exc_summary = ExceptionSummaryWriter("Collate Error Summary")
 
     def should_flush_summary(self) -> bool:
         if self.flush_every_n_steps is not None and self.exc_summary.num_steps >= self.flush_every_n_steps:
@@ -601,6 +641,7 @@ def test_error_handling_dataset_adhoc() -> None:
         max_samples=100,
         handle_errors=True,
         print_fn=lambda i, sample: logger.info("Sample %d: %d", i, sample),
+        batch_size=10,
     )
 
 

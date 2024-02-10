@@ -205,7 +205,12 @@ class Dataloader(Generic[T, Tc]):
             print_fn: The function to use for printing samples.
         """
         with self:
-            run_test(self, max_samples, log_interval, print_fn)
+            run_test(
+                ds=self,
+                max_samples=max_samples,
+                log_interval=log_interval,
+                print_fn=print_fn,
+            )
 
     def __iter__(self) -> "Dataloader[T, Tc]":
         return self
