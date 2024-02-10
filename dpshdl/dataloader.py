@@ -60,6 +60,7 @@ def dataloader_worker(
     stop_event: Event,
     worker_id: int,
     num_workers: int,
+    raise_errs: bool,
 ) -> None:
     worker_init_fn(worker_id, num_workers)
     dataset.worker_init(worker_id, num_workers)
@@ -71,6 +72,8 @@ def dataloader_worker(
             sample = dataset_iterator.__next__()
             queue.put(DataloaderItem(sample, None, worker_id))
         except BaseException as e:
+            if raise_errs:
+                raise
             queue.put(DataloaderItem(None, e, worker_id))
             break
 
@@ -82,6 +85,7 @@ def collate_worker(
     collate_fn: Callable[[list[T]], Tc | None],
     stop_event: Event,
     batch_size: int,
+    raise_errs: bool,
 ) -> None:
     worker_init_fn()
     samples: list[T] = []
@@ -101,6 +105,8 @@ def collate_worker(
                     collated_queue.put(DataloaderItem(collated, None, -1))
                 samples = []
         except BaseException as e:
+            if raise_errs:
+                raise
             collated_queue.put(DataloaderItem(None, e, -1))
             break
 
@@ -138,6 +144,13 @@ class Dataloader(Generic[T, Tc]):
         prefetch_factor: The number of batches to pre-load from the dataset.
         ctx: The multiprocessing context to use. If not provided, the default
             context will be used.
+        dataloader_worker_init_fn: The initialization function to use for
+            the dataloader workers, which takes the workd ID and the number of
+            workers as input.
+        collate_worker_init_fn: The initialization function to use for the
+            collate worker, which takes no inputs.
+        raise_errs: If set, raise worker errors instead of passing them to
+            the error queue.
     """
 
     def __init__(
@@ -149,6 +162,7 @@ class Dataloader(Generic[T, Tc]):
         ctx: BaseContext | None = None,
         dataloader_worker_init_fn: Callable[[int, int], None] = dataloader_worker_init_fn,
         collate_worker_init_fn: Callable[[], None] = collate_worker_init_fn,
+        raise_errs: bool = False,
     ) -> None:
         super().__init__()
 
@@ -167,6 +181,7 @@ class Dataloader(Generic[T, Tc]):
         self.ctx = mp.get_context() if ctx is None else ctx
         self.dataloader_worker_init_fn = dataloader_worker_init_fn
         self.collate_worker_init_fn = collate_worker_init_fn
+        self.raise_errs = raise_errs
         self.manager = self.ctx.Manager()
 
         self.processes: list[mp.Process] | None = None
@@ -219,6 +234,7 @@ class Dataloader(Generic[T, Tc]):
                             self.stop_event,
                             i,
                             self.num_workers,
+                        self.raise_errs,
                         ),
                         daemon=True,
                         name=f"dataloader-worker-{i}",
@@ -234,6 +250,7 @@ class Dataloader(Generic[T, Tc]):
                         self.dataset.collate,
                         self.stop_event,
                         self.batch_size,
+                        self.raise_errs,
                     ),
                     name="dataloader-worker-collate",
                 )
@@ -249,6 +266,7 @@ class Dataloader(Generic[T, Tc]):
                         self.stop_event,
                         0,
                         1,
+                        self.raise_errs,
                     ),
                 )
                 dataloader_thread.start()
@@ -261,6 +279,7 @@ class Dataloader(Generic[T, Tc]):
                         self.dataset.collate,
                         self.stop_event,
                         self.batch_size,
+                        self.raise_errs,
                     ),
                 )
                 collate_thread.start()
