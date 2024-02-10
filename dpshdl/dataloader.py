@@ -234,7 +234,7 @@ class Dataloader(Generic[T, Tc]):
                             self.stop_event,
                             i,
                             self.num_workers,
-                        self.raise_errs,
+                            self.raise_errs,
                         ),
                         daemon=True,
                         name=f"dataloader-worker-{i}",
