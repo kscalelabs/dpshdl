@@ -387,6 +387,10 @@ def configure_logging(prefix: str | None = None) -> None:
     """
     root_logger = logging.getLogger()
 
+    # Remove all existing handlers.
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
     # Captures warnings from the warnings module.
     logging.captureWarnings(True)
 
