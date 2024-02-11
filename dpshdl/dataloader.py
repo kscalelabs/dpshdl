@@ -48,19 +48,23 @@ class Timer:
 
 
 @dataclass(frozen=True)
+class Stats:
+    worker_id: int
+    elapsed_time: float
+
+
+@dataclass(frozen=True)
 class DataloaderItem(Generic[T]):
     item: T | None
     exception: BaseException | None
-    worker_id: int
-    elapsed_time: float
+    stats: Stats
 
 
 @dataclass(frozen=True)
 class CollatedDataloaderItem(Generic[T]):
     item: T | None
     exception: BaseException | None
-    worker_ids: list[int]
-    elapsed_times: list[float]
+    stats: list[Stats]
 
 
 def init_random(worker_id: int = 0) -> None:
@@ -96,11 +100,11 @@ def dataloader_worker(
         try:
             with Timer() as timer:
                 sample = dataset_iterator.__next__()
-            queue.put(DataloaderItem(sample, None, worker_id, timer.elapsed_time))
+            queue.put(DataloaderItem(sample, None, Stats(worker_id, timer.elapsed_time)))
         except BaseException as e:
             if raise_errs:
                 raise
-            queue.put(DataloaderItem(None, e, worker_id, 0.0))
+            queue.put(DataloaderItem(None, e, Stats(worker_id, 0.0)))
             break
 
 
@@ -120,14 +124,7 @@ def collate_worker(
             return
         sample = samples_queue.get()
         if sample.exception is not None:
-            collated_queue.put(
-                CollatedDataloaderItem(
-                    item=None,
-                    exception=sample.exception,
-                    worker_ids=[sample.worker_id],
-                    elapsed_times=[sample.elapsed_time],
-                )
-            )
+            collated_queue.put(CollatedDataloaderItem(None, sample.exception, [sample.stats]))
             break
         if sample.item is None:
             raise RuntimeError("`item` should not be `None` unless there was an exception")
@@ -135,25 +132,11 @@ def collate_worker(
         if len(samples) == batch_size:
             try:
                 if (collated := collate_fn([s.item for s in samples if s.item is not None])) is not None:
-                    collated_queue.put(
-                        CollatedDataloaderItem(
-                            item=collated,
-                            exception=None,
-                            worker_ids=[s.worker_id for s in samples],
-                            elapsed_times=[s.elapsed_time for s in samples],
-                        )
-                    )
+                    collated_queue.put(CollatedDataloaderItem(collated, None, [s.stats for s in samples]))
             except BaseException as e:
                 if raise_errs:
                     raise
-                collated_queue.put(
-                    CollatedDataloaderItem(
-                        item=None,
-                        exception=e,
-                        worker_ids=[s.worker_id for s in samples],
-                        elapsed_times=[s.elapsed_time for s in samples],
-                    )
-                )
+                collated_queue.put(CollatedDataloaderItem(None, e, [s.stats for s in samples]))
                 break
             finally:
                 samples = []
