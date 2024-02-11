@@ -12,6 +12,7 @@ import multiprocessing as mp
 import os
 import random
 import threading
+import time
 from dataclasses import dataclass
 from multiprocessing.context import BaseContext
 from queue import Queue
@@ -31,11 +32,35 @@ T = TypeVar("T")
 Tc = TypeVar("Tc")
 
 
+class Timer:
+    def __init__(self) -> None:
+        super().__init__()
+
+        self.start_time = 0.0
+        self.elapsed_time = 0.0
+
+    def __enter__(self) -> Self:
+        self.start_time = time.time()
+        return self
+
+    def __exit__(self, _t: type[BaseException] | None, _e: BaseException | None, _tr: TracebackType | None) -> None:
+        self.elapsed_time = time.time() - self.start_time
+
+
 @dataclass(frozen=True)
 class DataloaderItem(Generic[T]):
     item: T | None
     exception: BaseException | None
     worker_id: int
+    elapsed_time: float
+
+
+@dataclass(frozen=True)
+class CollatedDataloaderItem(Generic[T]):
+    item: T | None
+    exception: BaseException | None
+    worker_ids: list[int]
+    elapsed_times: list[float]
 
 
 def init_random(worker_id: int = 0) -> None:
@@ -69,46 +94,69 @@ def dataloader_worker(
         if stop_event.is_set():
             return
         try:
-            sample = dataset_iterator.__next__()
-            queue.put(DataloaderItem(sample, None, worker_id))
+            with Timer() as timer:
+                sample = dataset_iterator.__next__()
+            queue.put(DataloaderItem(sample, None, worker_id, timer.elapsed_time))
         except BaseException as e:
             if raise_errs:
                 raise
-            queue.put(DataloaderItem(None, e, worker_id))
+            queue.put(DataloaderItem(None, e, worker_id, 0.0))
             break
 
 
 def collate_worker(
     worker_init_fn: Callable[[], None],
     samples_queue: "Queue[DataloaderItem[T]]",
-    collated_queue: "Queue[DataloaderItem[Tc]]",
+    collated_queue: "Queue[CollatedDataloaderItem[Tc]]",
     collate_fn: Callable[[list[T]], Tc | None],
     stop_event: Event,
     batch_size: int,
     raise_errs: bool,
 ) -> None:
     worker_init_fn()
-    samples: list[T] = []
+    samples: list[DataloaderItem[T]] = []
     while True:
         if stop_event.is_set():
             return
-        try:
-            sample = samples_queue.get()
-            if sample.exception is not None:
-                collated_queue.put(DataloaderItem(None, sample.exception, sample.worker_id))
-                break
-            if sample.item is None:
-                raise RuntimeError("`item` should not be `None` unless there was an exception")
-            samples.append(sample.item)
-            if len(samples) == batch_size:
-                if (collated := collate_fn(samples)) is not None:
-                    collated_queue.put(DataloaderItem(collated, None, -1))
-                samples = []
-        except BaseException as e:
-            if raise_errs:
-                raise
-            collated_queue.put(DataloaderItem(None, e, -1))
+        sample = samples_queue.get()
+        if sample.exception is not None:
+            collated_queue.put(
+                CollatedDataloaderItem(
+                    item=None,
+                    exception=sample.exception,
+                    worker_ids=[sample.worker_id],
+                    elapsed_times=[sample.elapsed_time],
+                )
+            )
             break
+        if sample.item is None:
+            raise RuntimeError("`item` should not be `None` unless there was an exception")
+        samples.append(sample)
+        if len(samples) == batch_size:
+            try:
+                if (collated := collate_fn([s.item for s in samples if s.item is not None])) is not None:
+                    collated_queue.put(
+                        CollatedDataloaderItem(
+                            item=collated,
+                            exception=None,
+                            worker_ids=[s.worker_id for s in samples],
+                            elapsed_times=[s.elapsed_time for s in samples],
+                        )
+                    )
+            except BaseException as e:
+                if raise_errs:
+                    raise
+                collated_queue.put(
+                    CollatedDataloaderItem(
+                        item=None,
+                        exception=e,
+                        worker_ids=[s.worker_id for s in samples],
+                        elapsed_times=[s.elapsed_time for s in samples],
+                    )
+                )
+                break
+            finally:
+                samples = []
 
 
 def default_num_workers(default: int) -> int:
@@ -149,6 +197,8 @@ class Dataloader(Generic[T, Tc]):
             workers as input.
         collate_worker_init_fn: The initialization function to use for the
             collate worker, which takes no inputs.
+        item_callback: A callback function to call for each item before it is
+            returned. This can be used for logging or debugging purposes.
         raise_errs: If set, raise worker errors instead of passing them to
             the error queue.
     """
@@ -162,6 +212,7 @@ class Dataloader(Generic[T, Tc]):
         ctx: BaseContext | None = None,
         dataloader_worker_init_fn: Callable[[int, int], None] = dataloader_worker_init_fn,
         collate_worker_init_fn: Callable[[], None] = collate_worker_init_fn,
+        item_callback: Callable[[CollatedDataloaderItem[Tc]], None] = lambda _: None,
         raise_errs: bool = False,
     ) -> None:
         super().__init__()
@@ -181,13 +232,14 @@ class Dataloader(Generic[T, Tc]):
         self.ctx = mp.get_context() if ctx is None else ctx
         self.dataloader_worker_init_fn = dataloader_worker_init_fn
         self.collate_worker_init_fn = collate_worker_init_fn
+        self.item_callback = item_callback
         self.raise_errs = raise_errs
         self.manager = self.ctx.Manager()
 
         self.processes: list[mp.Process] | None = None
         self.single_process_threads: tuple[threading.Thread, threading.Thread] | None = None
         self.samples_queue: Queue[DataloaderItem[T]] = self.manager.Queue(maxsize=batch_size * prefetch_factor)
-        self.collated_queue: Queue[DataloaderItem[Tc]] = self.manager.Queue(maxsize=prefetch_factor)
+        self.collated_queue: Queue[CollatedDataloaderItem[Tc]] = self.manager.Queue(maxsize=prefetch_factor)
         self.stop_event: Event = self.manager.Event()
 
     def test(
@@ -219,8 +271,9 @@ class Dataloader(Generic[T, Tc]):
         if self.processes is None and self.single_process_threads is None:
             raise RuntimeError("Dataloader is not running")
         item = self.collated_queue.get()
+        self.item_callback(item)
         if item.exception:
-            raise item.exception
+            raise RuntimeError(f"Exception for worker ID(s) {item.worker_ids}: {item.exception}")
         if item.item is None:
             raise RuntimeError("`item` should not be `None` unless there was an exception")
         return item.item
