@@ -34,6 +34,12 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
     forever. This means that there is no concept of an epoch or dataset size.
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+
+        self.worker_id = 0
+        self.num_workers = 1
+
     def worker_init(self, worker_id: int, num_workers: int) -> None:
         """Initializes the dataset worker.
 
@@ -44,6 +50,8 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
             worker_id: The ID of the worker.
             num_workers: The number of workers in the worker pool.
         """
+        self.worker_id = worker_id
+        self.num_workers = num_workers
 
     @abstractmethod
     def next(self) -> T:
