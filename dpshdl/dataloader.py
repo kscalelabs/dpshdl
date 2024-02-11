@@ -368,7 +368,7 @@ class _DummyDataset(Dataset[int, list[int]]):
 
     def collate(self, items: list[int]) -> list[int]:
         assert random.random() > 0.1, "A random error"
-        time.sleep(0.1)
+        time.sleep(random.random() * 0.1)
         return items
 
 
@@ -381,7 +381,6 @@ def test_error_handling_dataset_adhoc(test_samples: int = 1000000) -> None:
             flush_every_n_seconds=None,
         ),
         batch_size=2,
-        num_workers=2,
     ).test(
         max_samples=test_samples,
         print_fn=lambda i, sample: logger.info("Sample %d: %s", i, sample),
