@@ -96,7 +96,7 @@ def dataloader_worker(
     dataset_iterator = dataset.__iter__()
     while True:
         if stop_event.is_set():
-            return
+            break
         try:
             with Timer() as timer:
                 sample = dataset_iterator.__next__()
@@ -121,7 +121,7 @@ def collate_worker(
     samples: list[DataloaderItem[T]] = []
     while True:
         if stop_event.is_set():
-            return
+            break
         sample = samples_queue.get()
         if sample.exception is not None:
             collated_queue.put(CollatedDataloaderItem(None, sample.exception, [sample.stats]))
@@ -337,10 +337,16 @@ class Dataloader(Generic[T, Tc]):
         # the queue. Clearing the queue is important because otherwise the
         # workers will block while trying to put items on the queue.
         self.stop_event.set()
-        while not self.samples_queue.empty():
-            self.samples_queue.get()
-        while not self.collated_queue.empty():
-            self.collated_queue.get()
+        try:
+            while not self.collated_queue.empty():
+                self.collated_queue.get_nowait()
+        except Exception:
+            pass
+        try:
+            while not self.samples_queue.empty():
+                self.samples_queue.get_nowait()
+        except Exception:
+            pass
 
         # Joins the dataloader workers.
         if self.processes is not None:
@@ -362,10 +368,11 @@ class _DummyDataset(Dataset[int, list[int]]):
 
     def collate(self, items: list[int]) -> list[int]:
         assert random.random() > 0.1, "A random error"
+        time.sleep(0.1)
         return items
 
 
-def test_error_handling_dataset_adhoc(test_samples: int = 100) -> None:
+def test_error_handling_dataset_adhoc(test_samples: int = 1000000) -> None:
     """Tests the error handling dataset."""
     Dataloader(
         ErrorHandlingDataset(
@@ -374,6 +381,7 @@ def test_error_handling_dataset_adhoc(test_samples: int = 100) -> None:
             flush_every_n_seconds=None,
         ),
         batch_size=2,
+        num_workers=2,
     ).test(
         max_samples=test_samples,
         print_fn=lambda i, sample: logger.info("Sample %d: %s", i, sample),
