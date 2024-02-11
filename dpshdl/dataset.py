@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from collections import Counter, deque
 from dataclasses import dataclass
 from queue import Queue
-from typing import Callable, Deque, Generic, Iterator, Sequence, TypeVar
+from typing import Callable, Deque, Generic, Iterator, Sequence, TypeVar, final
 
 import numpy as np
 
@@ -49,6 +49,7 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
         Args:
             worker_id: The ID of the worker.
             num_workers: The number of workers in the worker pool.
+            lock: A lock shared by all dataset workers in the dataloader.
         """
         self.worker_id = worker_id
         self.num_workers = num_workers
@@ -72,10 +73,12 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
         """
         return collate(items)
 
+    @final
     def __iter__(self) -> "Dataset[T, Tc]":
         # Don't override this! Use `worker_init` instead.
         return self
 
+    @final
     def __next__(self) -> T:
         # Don't override this! Use `next` instead.
         return self.next()
@@ -169,6 +172,8 @@ class TensorDataset(Dataset[Tarrays, Tarrays], Generic[Tarrays]):
         self.rand = np.random.RandomState(0)
 
     def worker_init(self, worker_id: int, num_workers: int) -> None:
+        super().worker_init(worker_id, num_workers)
+
         self._worker_tensors = [worker_chunk(t, worker_id, num_workers) for t in self.tensors]
         self._worker_num_samples = self._worker_tensors[0].shape[self.dim]
         if not all(t.shape[self.dim] == self._worker_num_samples for t in self._worker_tensors):
@@ -210,11 +215,11 @@ class ChunkedDataset(Dataset[T, Tc], Generic[T, Tc], ABC):
             queue at a time.
     """
 
-    def __init__(self, max_queue_size: int = 32) -> None:
+    def __init__(self, max_queue_size: int = 0) -> None:
         super().__init__()
 
         self._max_queue_size = max_queue_size
-        self._next_chunk_thread: tuple[threading.Event, threading.Thread, Queue[T], Queue[Exception]] | None = None
+        self._next_chunk_thread: tuple[threading.Thread, Queue[T], Queue[Exception]] | None = None
 
     @abstractmethod
     def next_chunk(self) -> Iterator[T]:
@@ -224,18 +229,10 @@ class ChunkedDataset(Dataset[T, Tc], Generic[T, Tc], ABC):
             The next chunk of data.
         """
 
-    def chunked_dataset_thread(
-        self,
-        event: threading.Event,
-        next_chunk_queue: Queue[T],
-        error_queue: Queue[Exception],
-    ) -> None:
+    def chunked_dataset_thread(self, next_chunk_queue: Queue[T], error_queue: Queue[Exception]) -> None:
         while True:
             try:
                 for sample in self.next_chunk():
-                    if next_chunk_queue.full():
-                        event.clear()
-                        event.wait()
                     next_chunk_queue.put(sample)
             except (bdb.BdbQuit, KeyboardInterrupt, StopIteration):
                 raise
@@ -246,26 +243,20 @@ class ChunkedDataset(Dataset[T, Tc], Generic[T, Tc], ABC):
         if self._next_chunk_thread is None:
             next_chunk_queue: Queue[T] = Queue(maxsize=self._max_queue_size)
             error_queue: Queue[Exception] = Queue()
-            event = threading.Event()
             thread = threading.Thread(
                 target=self.chunked_dataset_thread,
-                args=(event, next_chunk_queue, error_queue),
+                args=(next_chunk_queue, error_queue),
                 daemon=True,
             )
             thread.start()
-            self._next_chunk_thread = (event, thread, next_chunk_queue, error_queue)
+            self._next_chunk_thread = (thread, next_chunk_queue, error_queue)
 
         # Gets the next sample event and the queues.
-        event, _, next_chunk_queue, error_queue = self._next_chunk_thread
+        _, next_chunk_queue, error_queue = self._next_chunk_thread
 
         # If there are any errors in the error queue, raise them.
         if not error_queue.empty():
             raise error_queue.get()
-
-        # If the thread is blocking but we're out of samples in the queue,
-        # signal the thread to start adding samples again.
-        if not event.is_set() and next_chunk_queue.empty():
-            event.set()
 
         return next_chunk_queue.get()
 
@@ -286,6 +277,8 @@ class RoundRobinDataset(Dataset[T, Tc], Generic[T, Tc]):
         self.i = 0
 
     def worker_init(self, worker_id: int, num_workers: int) -> None:
+        super().worker_init(worker_id, num_workers)
+
         for dataset in self.datasets:
             dataset.worker_init(worker_id, num_workers)
 
@@ -318,6 +311,8 @@ class RandomDataset(Dataset[T, Tc], Generic[T, Tc]):
         self.stop_on_first = stop_on_first
 
     def worker_init(self, worker_id: int, num_workers: int) -> None:
+        super().worker_init(worker_id, num_workers)
+
         for dataset in self.datasets:
             dataset.worker_init(worker_id, num_workers)
 
@@ -353,6 +348,8 @@ class InMemoryDataset(Dataset[T, Tc], Generic[T, Tc]):
         self.pool: Deque[T] = deque()
 
     def worker_init(self, worker_id: int, num_workers: int) -> None:
+        super().worker_init(worker_id, num_workers)
+
         self.dataset.worker_init(worker_id, num_workers)
 
     def next(self) -> T:
@@ -583,6 +580,8 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
         return False
 
     def worker_init(self, worker_id: int, num_workers: int) -> None:
+        super().worker_init(worker_id, num_workers)
+
         self.dataset.worker_init(worker_id, num_workers)
         if worker_id != 0 and not self.log_exceptions_all_workers:
             self.log_exceptions = False
