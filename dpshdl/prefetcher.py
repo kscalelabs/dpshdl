@@ -10,6 +10,7 @@ from types import TracebackType
 from typing import Callable, Generic, Iterable, Iterator, TypeVar
 
 from dpshdl.dataloader import Dataloader
+from dpshdl.testing import print_sample, run_test
 
 T = TypeVar("T")
 Tc_co = TypeVar("Tc_co", covariant=True)
@@ -44,3 +45,25 @@ class Prefetcher(Iterable[Tp_co], Generic[Tc_co, Tp_co]):
 
     def __exit__(self, _t: type[BaseException] | None, _e: BaseException | None, _tr: TracebackType | None) -> None:
         self.dataloader.__exit__(_t, _e, _tr)
+
+    def test(
+        self,
+        max_samples: int = 10,
+        log_interval: int | None = 1,
+        print_fn: Callable[[int, Tp_co], None] = print_sample,
+    ) -> None:
+        """Defines a function for doing adhoc testing of the prefetcher.
+
+        Args:
+            max_samples: The maximum number of samples to test.
+            log_interval: How often to log a sample. If None, don't log any
+                samples.
+            print_fn: The function to use for printing samples.
+        """
+        with self:
+            run_test(
+                ds=self,
+                max_samples=max_samples,
+                log_interval=log_interval,
+                print_fn=print_fn,
+            )
