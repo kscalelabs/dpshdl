@@ -535,6 +535,7 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
         flush_every_n_steps: Flush the exception summary every N steps.
         flush_every_n_seconds: Flush the exception summary every N seconds.
         log_exceptions_all_workers: If set, log exceptions from all workers.
+        log_level: The log level to use for logging exceptions.
     """
 
     def __init__(
@@ -548,6 +549,7 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
         flush_every_n_steps: int | None = None,
         flush_every_n_seconds: float | None = 60.0,
         log_exceptions_all_workers: bool = False,
+        log_level: int = logging.INFO,
     ) -> None:
         super().__init__()
 
@@ -561,6 +563,7 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
         self.flush_every_n_seconds = flush_every_n_seconds
         self.log_exceptions_all_workers = log_exceptions_all_workers
         self.log_exceptions = True
+        self.log_level = log_level
 
         self.exc_summary = ExceptionSummaryWriter("Error Summary")
         self.col_exc_summary = ExceptionSummaryWriter("Collate Error Summary")
@@ -593,7 +596,7 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
 
         if self.should_flush_summary():
             if self.log_exceptions and self.exc_summary:
-                logger.info("Exception summary:\n%s", self.exc_summary.summary())
+                logger.warning("Exception summary:\n%s", self.exc_summary.summary())
             self.exc_summary.clear()
 
         while num_exceptions < self.maximum_exceptions:
@@ -615,7 +618,7 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
 
         if self.should_flush_col_summary():
             if self.log_exceptions and self.col_exc_summary:
-                logger.info("Exception summary:\n%s", self.col_exc_summary.summary())
+                logger.log(self.log_level, "Exception summary:\n%s", self.col_exc_summary.summary())
             self.col_exc_summary.clear()
 
         try:
