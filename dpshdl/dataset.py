@@ -596,7 +596,7 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
 
         if self.should_flush_summary():
             if self.log_exceptions and self.exc_summary:
-                logger.warning("Exception summary:\n%s", self.exc_summary.summary())
+                logger.log(self.log_level, "Exception summary:\n%s", self.exc_summary.summary())
             self.exc_summary.clear()
 
         while num_exceptions < self.maximum_exceptions:
