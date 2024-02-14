@@ -256,7 +256,7 @@ class Dataloader(Generic[T, Tc]):
         item = self.collated_queue.get()
         self.item_callback(item)
         if item.exception:
-            raise RuntimeError(f"Exception for worker ID(s) {item.worker_ids}: {item.exception}")
+            raise RuntimeError(f"Exception for worker ID(s) {[s.worker_id for s in item.stats]}: {item.exception}")
         if item.item is None:
             raise RuntimeError("`item` should not be `None` unless there was an exception")
         return item.item
