@@ -205,7 +205,7 @@ class ChunkedDataset(Dataset[T, Tc], Generic[T, Tc], ABC):
                     yield line
 
     In the above example, we use a large buffer size to reduce the number of
-    IO operations. Since this happens in a separate thread, we don't need to
+    IO operations. Since this happens in a coroutine, we don't need to
     worry about creating a new file pointer for each chunk.
 
     Parameters:
