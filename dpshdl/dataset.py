@@ -5,12 +5,10 @@ import logging
 import random
 import re
 import sys
-import threading
 import time
 from abc import ABC, abstractmethod
 from collections import Counter, deque
 from dataclasses import dataclass
-from queue import Queue
 from typing import Callable, Deque, Generic, Iterator, Sequence, TypeVar, final
 
 import numpy as np
@@ -219,7 +217,7 @@ class ChunkedDataset(Dataset[T, Tc], Generic[T, Tc], ABC):
         super().__init__()
 
         self._max_queue_size = max_queue_size
-        self._next_chunk_thread: tuple[threading.Thread, Queue[T], Queue[Exception]] | None = None
+        self._next_chunk_iterator: Iterator[T] | None = None
 
     @abstractmethod
     def next_chunk(self) -> Iterator[T]:
@@ -229,36 +227,16 @@ class ChunkedDataset(Dataset[T, Tc], Generic[T, Tc], ABC):
             The next chunk of data.
         """
 
-    def chunked_dataset_thread(self, next_chunk_queue: Queue[T], error_queue: Queue[Exception]) -> None:
+    def chunked_dataset_iterator(self) -> Iterator[T]:
         while True:
-            try:
-                for sample in self.next_chunk():
-                    next_chunk_queue.put(sample)
-            except (bdb.BdbQuit, KeyboardInterrupt, StopIteration):
-                raise
-            except Exception as e:
-                error_queue.put(e)
+            for sample in self.next_chunk():
+                yield sample
 
     def next(self) -> T:
-        if self._next_chunk_thread is None:
-            next_chunk_queue: Queue[T] = Queue(maxsize=self._max_queue_size)
-            error_queue: Queue[Exception] = Queue()
-            thread = threading.Thread(
-                target=self.chunked_dataset_thread,
-                args=(next_chunk_queue, error_queue),
-                daemon=True,
-            )
-            thread.start()
-            self._next_chunk_thread = (thread, next_chunk_queue, error_queue)
-
-        # Gets the next sample event and the queues.
-        _, next_chunk_queue, error_queue = self._next_chunk_thread
-
-        # If there are any errors in the error queue, raise them.
-        if not error_queue.empty():
-            raise error_queue.get()
-
-        return next_chunk_queue.get()
+        if self._next_chunk_iterator is None:
+            self._next_chunk_iterator = self.chunked_dataset_iterator()
+        sample = next(self._next_chunk_iterator)
+        return sample
 
 
 class RoundRobinDataset(Dataset[T, Tc], Generic[T, Tc]):
