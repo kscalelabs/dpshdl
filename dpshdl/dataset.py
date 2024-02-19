@@ -405,6 +405,8 @@ class ExceptionSummary:
     top_exception_types: list[tuple[str, int]]
     top_exception_locations: list[tuple[str, int]]
     last_exception: Exception | None
+    show_end: int | float | None
+    max_lines: int | None
 
     def __str__(self) -> str:
         blocks: list[list[TextBlock]] = []
@@ -434,7 +436,7 @@ class ExceptionSummary:
 
         def get_line(ks: str, v: int) -> list[list[TextBlock]]:
             line = [
-                TextBlock(ks, width=60, no_sep=True),
+                TextBlock(ks, width=60, no_sep=True, show_end=self.show_end, max_lines=self.max_lines),
                 TextBlock(f"{v}", width=10, no_sep=True),
                 TextBlock(f"{v / self.num_steps * 100:.2f}%", width=10, no_sep=True),
             ]
@@ -468,13 +470,23 @@ class ExceptionSummaryWriter:
     Parameters:
         title: The title for each summary.
         max_exceptions: The maximum number of unique exceptions to log.
+        show_end: How much of the ending of each exception to show.
+        max_lines: The maximum number of lines to show of each error message.
     """
 
-    def __init__(self, title: str, max_exceptions: int = 10) -> None:
+    def __init__(
+        self,
+        title: str,
+        max_exceptions: int = 5,
+        show_end: int | float | None = 0.5,
+        max_lines: int | None = 3,
+    ) -> None:
         super().__init__()
 
         self.title = title
         self.max_exceptions = max_exceptions
+        self.show_end = show_end
+        self.max_lines = max_lines
 
         self.exceptions: Counter[str] = Counter()
         self.exception_classes: Counter[str] = Counter()
@@ -485,8 +497,6 @@ class ExceptionSummaryWriter:
         self.start_time = time.time()
         self.step_has_error = False
         self.total_exceptions = 0
-
-        self.cleanup_regex = re.compile(r"[\n\r\t]")
 
     @property
     def elapsed_time(self) -> float:
@@ -502,13 +512,10 @@ class ExceptionSummaryWriter:
     def __bool__(self) -> bool:
         return len(self.exceptions) > 0
 
-    def cleanup_text(self, s: str) -> str:
-        return self.cleanup_regex.sub("", s)
-
     def add_exception(self, exc: Exception, loc: str) -> None:
         self.last_exception = exc
-        self.exceptions[self.cleanup_text(f"{exc.__class__.__name__}: {exc}")] += 1
-        self.exception_classes[self.cleanup_text(exc.__class__.__name__)] += 1
+        self.exceptions[f"{exc.__class__.__name__}: {exc}"] += 1
+        self.exception_classes[exc.__class__.__name__] += 1
         self.exception_locs[loc] += 1
         if not self.step_has_error:
             self.step_has_error = True
@@ -524,6 +531,8 @@ class ExceptionSummaryWriter:
             top_exception_types=self.exception_classes.most_common(self.max_exceptions),
             top_exception_locations=self.exception_locs.most_common(self.max_exceptions),
             last_exception=self.last_exception,
+            show_end=self.show_end,
+            max_lines=self.max_lines,
         )
 
     def clear(self) -> None:
@@ -565,7 +574,7 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
         dataset: Dataset[T, Tc],
         sleep_backoff: float = 0.1,
         sleep_backoff_power: float = 2.0,
-        maximum_exceptions: int = 10,
+        maximum_exceptions: int = 5,
         backoff_after: int = 5,
         traceback_depth: int = 3,
         flush_every_n_steps: int | None = None,
@@ -618,7 +627,7 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
 
         if self.should_flush_summary():
             if self.log_exceptions and self.exc_summary:
-                logger.log(self.log_level, "%s", self.exc_summary.summary())
+                logger.log(self.log_level, "\n%s", self.exc_summary.summary())
             self.exc_summary.clear()
 
         while num_exceptions < self.maximum_exceptions:
@@ -640,7 +649,7 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
 
         if self.should_flush_col_summary():
             if self.log_exceptions and self.col_exc_summary:
-                logger.log(self.log_level, "%s", self.col_exc_summary.summary())
+                logger.log(self.log_level, "\n%s", self.col_exc_summary.summary())
             self.col_exc_summary.clear()
 
         try:
