@@ -477,7 +477,7 @@ class ExceptionSummaryWriter:
     def __init__(
         self,
         title: str,
-        max_exceptions: int = 10,
+        max_exceptions: int = 5,
         show_end: int | float | None = 0.5,
         max_lines: int | None = 3,
     ) -> None:
