@@ -486,6 +486,8 @@ class ExceptionSummaryWriter:
         self.step_has_error = False
         self.total_exceptions = 0
 
+        self.cleanup_regex = re.compile(r"[\n\r\t]")
+
     @property
     def elapsed_time(self) -> float:
         return time.time() - self.start_time
@@ -500,10 +502,13 @@ class ExceptionSummaryWriter:
     def __bool__(self) -> bool:
         return len(self.exceptions) > 0
 
+    def cleanup_text(self, s: str) -> str:
+        return self.cleanup_regex.sub("", s)
+
     def add_exception(self, exc: Exception, loc: str) -> None:
         self.last_exception = exc
-        self.exceptions[f"{exc.__class__.__name__}: {exc}"] += 1
-        self.exception_classes[exc.__class__.__name__] += 1
+        self.exceptions[self.cleanup_text(f"{exc.__class__.__name__}: {exc}")] += 1
+        self.exception_classes[self.cleanup_text(exc.__class__.__name__)] += 1
         self.exception_locs[loc] += 1
         if not self.step_has_error:
             self.step_has_error = True
