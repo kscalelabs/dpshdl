@@ -84,22 +84,20 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
     def sample(
         self,
         batch_size: int,
-        ignore_errors: bool = False,
+        max_errors: int | None = 0,
         to_device_func: Callable[[Tc], Tc] = lambda x: x,
-        max_errors_to_ignore: int | None = 10,
-    ) -> Tc:
+    ) -> Tc | None:
         """Gets a sample from the dataset.
 
         Args:
             batch_size: The number of samples to draw.
-            ignore_errors: If set, ignores errors when collating the sample.
+            max_errors: The maximum number of errors to allow before raising
+                an error. If None, ignore all errors.
             to_device_func: The function to use for moving the sample to the
                 device.
-            max_errors_to_ignore: The maximum number of errors to ignore. If
-                None, ignore all errors.
 
         Returns:
-            The collated sample.
+            The collated sample, or None if no samples were drawn.
         """
         samples: list[T] = []
         num_errors = 0
@@ -110,17 +108,13 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
             except (StopIteration, KeyboardInterrupt):
                 break
             except Exception as e:
-                if ignore_errors:
-                    num_errors += 1
-                    if max_errors_to_ignore is not None and num_errors > max_errors_to_ignore:
-                        raise
-                    logger.error("Error: %s", e)
-                else:
+                num_errors += 1
+                if max_errors is not None and num_errors >= max_errors:
                     raise
+                else:
+                    logger.error("Error %d: %s", num_errors, e)
         collated_sample = self.collate(samples)
-        if collated_sample is None:
-            raise ValueError("Collate function returned None.")
-        return to_device_func(collated_sample)
+        return None if collated_sample is None else to_device_func(collated_sample)
 
     def test(
         self,
