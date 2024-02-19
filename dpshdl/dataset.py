@@ -81,21 +81,46 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
         # Don't override this! Use `next` instead.
         return self.next()
 
-    def sample(self, batch_size: int, to_device_func: Callable[[Tc], Tc] = lambda x: x) -> Tc:
+    def sample(
+        self,
+        batch_size: int,
+        ignore_errors: bool = False,
+        to_device_func: Callable[[Tc], Tc] = lambda x: x,
+        max_errors_to_ignore: int | None = 10,
+    ) -> Tc:
         """Gets a sample from the dataset.
 
         Args:
             batch_size: The number of samples to draw.
+            ignore_errors: If set, ignores errors when collating the sample.
             to_device_func: The function to use for moving the sample to the
                 device.
+            max_errors_to_ignore: The maximum number of errors to ignore. If
+                None, ignore all errors.
 
         Returns:
             The collated sample.
         """
-        sample = self.collate([self.next() for _ in range(batch_size)])
-        if sample is None:
+        samples: list[T] = []
+        num_errors = 0
+        sample_iter = iter(self)
+        while len(samples) < batch_size:
+            try:
+                samples.append(next(sample_iter))
+            except (StopIteration, KeyboardInterrupt):
+                break
+            except Exception as e:
+                if ignore_errors:
+                    num_errors += 1
+                    if max_errors_to_ignore is not None and num_errors > max_errors_to_ignore:
+                        raise
+                    logger.error("Error: %s", e)
+                else:
+                    raise
+        collated_sample = self.collate(samples)
+        if collated_sample is None:
             raise ValueError("Collate function returned None.")
-        return to_device_func(sample)
+        return to_device_func(collated_sample)
 
     def test(
         self,
