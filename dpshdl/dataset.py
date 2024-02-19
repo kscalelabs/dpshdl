@@ -81,6 +81,22 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
         # Don't override this! Use `next` instead.
         return self.next()
 
+    def sample(self, batch_size: int, to_device_func: Callable[[Tc], Tc] = lambda x: x) -> Tc:
+        """Gets a sample from the dataset.
+
+        Args:
+            batch_size: The number of samples to draw.
+            to_device_func: The function to use for moving the sample to the
+                device.
+
+        Returns:
+            The collated sample.
+        """
+        sample = self.collate([self.next() for _ in range(batch_size)])
+        if sample is None:
+            raise ValueError("Collate function returned None.")
+        return to_device_func(sample)
+
     def test(
         self,
         max_samples: int = 10,
