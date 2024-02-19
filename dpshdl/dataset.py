@@ -81,6 +81,41 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
         # Don't override this! Use `next` instead.
         return self.next()
 
+    def sample(
+        self,
+        batch_size: int,
+        max_errors: int | None = 0,
+        to_device_func: Callable[[Tc], Tc] = lambda x: x,
+    ) -> Tc | None:
+        """Gets a sample from the dataset.
+
+        Args:
+            batch_size: The number of samples to draw.
+            max_errors: The maximum number of errors to allow before raising
+                an error. If None, ignore all errors.
+            to_device_func: The function to use for moving the sample to the
+                device.
+
+        Returns:
+            The collated sample, or None if no samples were drawn.
+        """
+        samples: list[T] = []
+        num_errors = 0
+        sample_iter = iter(self)
+        while len(samples) < batch_size:
+            try:
+                samples.append(next(sample_iter))
+            except (StopIteration, KeyboardInterrupt):
+                break
+            except Exception as e:
+                num_errors += 1
+                if max_errors is not None and num_errors >= max_errors:
+                    raise
+                else:
+                    logger.error("Error %d: %s", num_errors, e)
+        collated_sample = self.collate(samples)
+        return None if collated_sample is None else to_device_func(collated_sample)
+
     def test(
         self,
         max_samples: int = 10,
