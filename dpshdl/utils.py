@@ -73,19 +73,32 @@ def wrapped(
     spaces: str | re.Pattern = r" ",
     newlines: str | re.Pattern = r"[\n\r]",
     too_long_suffix: str = "...",
+    show_end: int | float | None = 0.5,
+    max_lines: int | None = None,
 ) -> list[str]:
     strings = []
     lines = re.split(newlines, s.strip(), flags=re.MULTILINE | re.UNICODE)
+
     for line in lines:
         cur_string = []
         cur_length = 0
+
         for part in re.split(spaces, line.strip(), flags=re.MULTILINE | re.UNICODE):
             if length is None:
                 cur_string.append(part)
                 cur_length += len(space) + len(part)
             else:
                 if len(part) > length:
-                    part = part[: length - len(too_long_suffix)] + too_long_suffix
+                    if show_end is None:
+                        part = part[: length - len(too_long_suffix)] + too_long_suffix
+                    else:
+                        if isinstance(show_end, float):
+                            show_end = round(length * show_end)
+                        part = (
+                            part[: max(length - len(too_long_suffix) - show_end, 0)]
+                            + too_long_suffix
+                            + part[max(len(part) - show_end, 0) :]
+                        )
                 if cur_length + len(part) > length:
                     strings.append(space.join(cur_string))
                     cur_string = [part]
@@ -95,6 +108,17 @@ def wrapped(
                     cur_length += len(space) + len(part)
         if cur_length > 0:
             strings.append(space.join(cur_string))
+
+    if max_lines is not None:
+        if max_lines < 1:
+            raise ValueError("`max_lines` must be at least 1")
+        if len(strings) > max_lines:
+            strings = strings[-max_lines:]
+            first_string, strings = strings[0], strings[1:]
+            if length is not None and len(first_string) > length - len(too_long_suffix):
+                first_string = first_string[len(too_long_suffix):]
+            strings = [too_long_suffix + first_string] + strings[: max_lines - 1]
+
     return strings
 
 
@@ -161,11 +185,13 @@ class TextBlock:
         too_long_suffix: str = "...",
         no_sep: bool = False,
         center: bool = False,
+        show_end: int | float | None = 0.5,
+        max_lines: int | None = None,
     ) -> None:
         super().__init__()
 
         self.width = width
-        self.lines = wrapped(uncolored(text), width, space, spaces, newlines, too_long_suffix)
+        self.lines = wrapped(uncolored(text), width, space, spaces, newlines, too_long_suffix, show_end, max_lines)
         self.color = color
         self.bold = bold
         self.no_sep = no_sep
