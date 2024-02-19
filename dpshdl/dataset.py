@@ -270,7 +270,11 @@ class ChunkedDataset(Dataset[T, Tc], Generic[T, Tc], ABC):
     def next(self) -> T:
         if self._next_chunk_iterator is None:
             self._next_chunk_iterator = self.chunked_dataset_iterator()
-        sample = next(self._next_chunk_iterator)
+        try:
+            sample = next(self._next_chunk_iterator)
+        except Exception:
+            self._next_chunk_iterator = None
+            raise
         return sample
 
 
