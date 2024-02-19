@@ -116,7 +116,7 @@ def wrapped(
             strings = strings[-max_lines:]
             first_string, strings = strings[0], strings[1:]
             if length is not None and len(first_string) > length - len(too_long_suffix):
-                first_string = first_string[len(too_long_suffix):]
+                first_string = first_string[len(too_long_suffix) :]
             strings = [too_long_suffix + first_string] + strings[: max_lines - 1]
 
     return strings
