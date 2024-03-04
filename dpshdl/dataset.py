@@ -242,8 +242,8 @@ class DatasetFunction(Dataset[To, Tco], Generic[Ti, To, Tc, Tco], ABC):
         return self.base_dataset.collate(items)  # type: ignore[arg-type, return-value]
 
     def apply_function_to_item(self, item: Ti) -> To:
-        if self.fn is not None:
-            return self.fn(item)
+        if self.item_fn is not None:
+            return self.item_fn(item)
         raise NotImplementedError(
             "Either the `fn` attribute must be provided or the `apply_function_to_item` method must be overridden."
         )
