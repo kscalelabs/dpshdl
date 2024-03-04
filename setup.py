@@ -3,7 +3,7 @@
 
 import re
 
-from setuptools import setup  # type: ignore[import-not-found]
+from setuptools import setup
 
 with open("README.md", "r", encoding="utf-8") as f:
     long_description: str = f.read()
