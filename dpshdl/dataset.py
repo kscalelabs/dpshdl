@@ -21,6 +21,8 @@ from dpshdl.utils import TextBlock, render_text_blocks
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")  # The type of the dataset item.
+Ti = TypeVar("Ti")  # Input type for the dataset function.
+To = TypeVar("To")  # Output type for the dataset function.
 Tc = TypeVar("Tc")  # The type of the collated item.
 Tarrays = TypeVar("Tarrays", bound=tuple[np.ndarray, ...])
 
@@ -116,6 +118,23 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
         collated_sample = self.collate(samples)
         return None if collated_sample is None else to_device_func(collated_sample)
 
+    def apply(
+        self,
+        fn: Callable[[T], To],
+        collate_fn: Callable[[list[To]], Tc] | None = None,
+    ) -> "Dataset[To, Tc]":
+        """Applies a function transformation to items in the dataset.
+
+        Args:
+            fn: The function to apply to each element of the dataset.
+            collate_fn: The new collate function to use; if not provided,
+                default to the current dataset's collate function.
+
+        Returns:
+            The new dataset.
+        """
+        return DatasetFunction(self, fn, collate_fn)
+
     def test(
         self,
         max_samples: int = 10,
@@ -174,6 +193,52 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
             batch_size=batch_size,
             log_batch_interval=log_batch_interval,
         )
+
+
+class DatasetFunction(Dataset[To, Tc], Generic[Ti, To, Tc], ABC):
+    """Defines a function to apply to samples from the dataset.
+
+    This can be used to apply a functional transformation to dataset items.
+
+    Parameters:
+        dataset: The dataset to apply the function to.
+        fn: The function to apply to each element of the dataset; if not
+            provided, then the `apply` method must be implemented.
+        collate_fn: The new collate function to use; if not provided, default
+            to the base dataset's collate function.
+    """
+
+    def __init__(
+        self,
+        dataset: Dataset[Ti, Tc],
+        fn: Callable[[Ti], To] | None = None,
+        collate_fn: Callable[[list[To]], Tc] | None = None,
+    ) -> None:
+        super().__init__()
+
+        self.base_dataset = dataset
+        self.fn = fn
+        self.collate_fn = collate_fn
+
+    def worker_init(self, worker_id: int, num_workers: int) -> None:
+        super().worker_init(worker_id, num_workers)
+
+        self.base_dataset.worker_init(worker_id, num_workers)
+
+    def collate(self, items: list[To]) -> Tc | None:
+        if self.collate_fn is not None:
+            return self.collate_fn(items)
+        return self.base_dataset.collate(items)  # type: ignore[arg-type]
+
+    def apply_function_to_item(self, item: Ti) -> To:
+        if self.fn is not None:
+            return self.fn(item)
+        raise NotImplementedError(
+            "Either the `fn` attribute must be provided or the `apply_function_to_item` method must be overridden."
+        )
+
+    def next(self) -> To:
+        return self.apply_function_to_item(self.base_dataset.next())
 
 
 class TensorDataset(Dataset[Tarrays, Tarrays], Generic[Tarrays]):

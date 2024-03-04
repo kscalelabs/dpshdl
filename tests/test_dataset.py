@@ -40,6 +40,11 @@ def test_random_dataset() -> None:
     assert all(0 <= i < 5 for i in itertools.islice(ds, 10))
 
 
+def test_apply_function() -> None:
+    ds = DummyDataset(5).apply(lambda x: str(x))
+    assert list(itertools.islice(ds, 10)) == ["5"] * 10
+
+
 class DummyChunkedDataset(ChunkedDataset[int, np.ndarray]):
     def __init__(self, value: int) -> None:
         super().__init__()
