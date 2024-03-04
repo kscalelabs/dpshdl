@@ -24,6 +24,7 @@ T = TypeVar("T")  # The type of the dataset item.
 Ti = TypeVar("Ti")  # Input type for the dataset function.
 To = TypeVar("To")  # Output type for the dataset function.
 Tc = TypeVar("Tc")  # The type of the collated item.
+Tco = TypeVar("Tco")  # The output type for the collate function.
 Tarrays = TypeVar("Tarrays", bound=tuple[np.ndarray, ...])
 
 
@@ -120,20 +121,20 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
 
     def apply(
         self,
-        fn: Callable[[T], To],
-        collate_fn: Callable[[list[To]], Tc] | None = None,
-    ) -> "Dataset[To, Tc]":
+        item_fn: Callable[[T], To],
+        collate_fn: Callable[[list[To]], Tco] | None = None,
+    ) -> "Dataset[To, Tco]":
         """Applies a function transformation to items in the dataset.
 
         Args:
-            fn: The function to apply to each element of the dataset.
-            collate_fn: The new collate function to use; if not provided,
-                default to the current dataset's collate function.
+            item_fn: The function to apply to each element of the dataset.
+            collate_fn: The new collate function to use. If not provided, the
+                default to the base dataset's collate function.
 
         Returns:
             The new dataset.
         """
-        return DatasetFunction(self, fn, collate_fn)
+        return DatasetFunction(self, item_fn, collate_fn)
 
     def test(
         self,
@@ -195,14 +196,14 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
         )
 
 
-class DatasetFunction(Dataset[To, Tc], Generic[Ti, To, Tc], ABC):
+class DatasetFunction(Dataset[To, Tco], Generic[Ti, To, Tc, Tco], ABC):
     """Defines a function to apply to samples from the dataset.
 
     This can be used to apply a functional transformation to dataset items.
 
     Parameters:
         dataset: The dataset to apply the function to.
-        fn: The function to apply to each element of the dataset; if not
+        item_fn: The function to apply to each element of the dataset; if not
             provided, then the `apply` method must be implemented.
         collate_fn: The new collate function to use; if not provided, default
             to the base dataset's collate function.
@@ -211,13 +212,13 @@ class DatasetFunction(Dataset[To, Tc], Generic[Ti, To, Tc], ABC):
     def __init__(
         self,
         dataset: Dataset[Ti, Tc],
-        fn: Callable[[Ti], To] | None = None,
-        collate_fn: Callable[[list[To]], Tc] | None = None,
+        item_fn: Callable[[Ti], To] | None = None,
+        collate_fn: Callable[[list[To]], Tco] | None = None,
     ) -> None:
         super().__init__()
 
         self.base_dataset = dataset
-        self.fn = fn
+        self.item_fn = item_fn
         self.collate_fn = collate_fn
 
     def worker_init(self, worker_id: int, num_workers: int) -> None:
@@ -225,10 +226,10 @@ class DatasetFunction(Dataset[To, Tc], Generic[Ti, To, Tc], ABC):
 
         self.base_dataset.worker_init(worker_id, num_workers)
 
-    def collate(self, items: list[To]) -> Tc | None:
+    def collate(self, items: list[To]) -> Tco | None:
         if self.collate_fn is not None:
             return self.collate_fn(items)
-        return self.base_dataset.collate(items)  # type: ignore[arg-type]
+        return self.base_dataset.collate(items)  # type: ignore[arg-type, return-value]
 
     def apply_function_to_item(self, item: Ti) -> To:
         if self.fn is not None:
