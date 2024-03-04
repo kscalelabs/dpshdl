@@ -50,7 +50,7 @@ py-files := $(shell find . -name '*.py')
 
 format:
 	@black $(py-files)
-	@ruff --fix $(py-files)
+	@ruff format $(py-files)
 .PHONY: format
 
 format-cpp:
@@ -60,7 +60,7 @@ format-cpp:
 
 static-checks:
 	@black --diff --check $(py-files)
-	@ruff $(py-files)
+	@ruff check $(py-files)
 	@mypy --install-types --non-interactive $(py-files)
 .PHONY: lint
 

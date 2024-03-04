@@ -9,7 +9,7 @@ import time
 from abc import ABC, abstractmethod
 from collections import Counter, deque
 from dataclasses import dataclass
-from typing import Callable, Deque, Generic, Iterator, Sequence, TypeVar, final
+from typing import Callable, Deque, Generic, Iterator, Sequence, TypeVar, final, overload
 
 import numpy as np
 
@@ -119,11 +119,21 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
         collated_sample = self.collate(samples)
         return None if collated_sample is None else to_device_func(collated_sample)
 
+    @overload
+    def apply(self, item_fn: Callable[[T], To]) -> "Dataset[To, Tc]": ...
+
+    @overload
+    def apply(
+        self,
+        item_fn: Callable[[T], To],
+        collate_fn: Callable[[list[To]], Tco],
+    ) -> "Dataset[To, Tco]": ...
+
     def apply(
         self,
         item_fn: Callable[[T], To],
         collate_fn: Callable[[list[To]], Tco] | None = None,
-    ) -> "Dataset[To, Tco]":
+    ) -> "Dataset":
         """Applies a function transformation to items in the dataset.
 
         Args:
