@@ -361,7 +361,11 @@ class RoundRobinDataset(Dataset[T, Tc], Generic[T, Tc]):
         datasets: The datasets to sample from.
     """
 
-    def __init__(self, datasets: Sequence[Dataset[T, Tc]], collate_fn: Callable[[list[T]], Tc | None]) -> None:
+    def __init__(
+        self,
+        datasets: Sequence[Dataset[T, Tc]],
+        collate_fn: Callable[[list[T]], Tc | None] = collate,
+    ) -> None:
         super().__init__()
 
         self.datasets = datasets
@@ -394,7 +398,7 @@ class RandomDataset(Dataset[T, Tc], Generic[T, Tc]):
     def __init__(
         self,
         datasets: Sequence[Dataset[T, Tc]],
-        collate_fn: Callable[[list[T]], Tc | None],
+        collate_fn: Callable[[list[T]], Tc | None] = collate,
         stop_on_first: bool = False,
     ) -> None:
         super().__init__()
