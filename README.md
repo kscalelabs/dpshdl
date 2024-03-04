@@ -4,8 +4,16 @@ A framework-agnostic library for loading data.
 
 ## Installation
 
+Install the package using:
+
 ```bash
 pip install dpshdl
+```
+
+Or, to install the latest branch:
+
+```bash
+pip install 'dpshdl @ git+https://github.com/kscalelabs/dpshdl.git@master'
 ```
 
 ## Usage
