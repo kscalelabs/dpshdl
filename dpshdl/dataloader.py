@@ -18,6 +18,7 @@ from multiprocessing.managers import SyncManager
 from queue import Queue
 from threading import Event
 from types import TracebackType
+import functools
 from typing import Callable, ContextManager, Generic, Self, TypeVar
 
 import numpy as np
@@ -113,6 +114,7 @@ def collate_worker(
     samples_queue: "Queue[DataloaderItem[T]]",
     collated_queue: "Queue[CollatedDataloaderItem[Tc]]",
     collate_fn: Callable[[list[T]], Tc | None],
+    post_collate_fn: Callable[[Tc], Tc],
     stop_event: Event,
     batch_size: int,
     raise_errs: bool,
@@ -132,6 +134,7 @@ def collate_worker(
         if len(samples) == batch_size:
             try:
                 if (collated := collate_fn([s.item for s in samples if s.item is not None])) is not None:
+                    collated = post_collate_fn(collated)
                     collated_queue.put(CollatedDataloaderItem(collated, None, [s.stats for s in samples]))
             except BaseException as e:
                 if raise_errs:
@@ -184,6 +187,8 @@ class Dataloader(Generic[T, Tc], ContextManager):
             returned. This can be used for logging or debugging purposes.
         raise_errs: If set, raise worker errors instead of passing them to
             the error queue.
+        post_collate_fn: A function to call on the collated batch before it is
+            returned. This can be used for post-processing the batch.
     """
 
     def __init__(
@@ -197,6 +202,7 @@ class Dataloader(Generic[T, Tc], ContextManager):
         collate_worker_init_fn: Callable[[], None] = collate_worker_init_fn,
         item_callback: Callable[[CollatedDataloaderItem[Tc]], None] = lambda _: None,
         raise_errs: bool = False,
+        post_collate_fn: Callable[[Tc], Tc] = lambda x: x,
     ) -> None:
         super().__init__()
 
@@ -216,6 +222,7 @@ class Dataloader(Generic[T, Tc], ContextManager):
         self.collate_worker_init_fn = collate_worker_init_fn
         self.item_callback = item_callback
         self.raise_errs = raise_errs
+        self.post_collate_fn = post_collate_fn
         self.manager = mp.get_context().Manager() if mp_manager is None else mp_manager
 
         self.processes: list[mp.Process] | None = None
@@ -288,6 +295,7 @@ class Dataloader(Generic[T, Tc], ContextManager):
                         self.samples_queue,
                         self.collated_queue,
                         self.dataset.collate,
+                        self.post_collate_fn,
                         self.stop_event,
                         self.batch_size,
                         self.raise_errs,
@@ -317,6 +325,7 @@ class Dataloader(Generic[T, Tc], ContextManager):
                         self.samples_queue,
                         self.collated_queue,
                         self.dataset.collate,
+                        self.post_collate_fn,
                         self.stop_event,
                         self.batch_size,
                         self.raise_errs,
