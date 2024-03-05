@@ -6,8 +6,6 @@ slow, so it is beneficial to pre-load the next sample into device memory while
 the current sample is being processed.
 """
 
-from queue import Queue
-from threading import Event, Thread
 from types import TracebackType
 from typing import Callable, ContextManager, Generic, Iterable, Iterator, TypeVar
 
@@ -18,63 +16,34 @@ Tc_co = TypeVar("Tc_co", covariant=True)
 Tp_co = TypeVar("Tp_co", covariant=True)
 
 
-def enqueue_thread(
-    dataloader: Iterator[Tc_co],
-    to_device_func: Callable[[Tc_co], Tp_co],
-    queue: Queue[Tp_co],
-    stop_event: Event,
-) -> None:
-    for sample in dataloader:
-        if stop_event.is_set():
-            break
-        queue.put(to_device_func(sample))
-
-
 class Prefetcher(Iterable[Tp_co], Generic[Tc_co, Tp_co]):
     """Helper class for pre-loading samples into device memory."""
 
-    def __init__(
-        self,
-        to_device_func: Callable[[Tc_co], Tp_co],
-        dataloader: Iterator[Tc_co],
-        prefetch_size: int = 2,
-    ) -> None:
+    def __init__(self, to_device_func: Callable[[Tc_co], Tp_co], dataloader: Iterator[Tc_co]) -> None:
         super().__init__()
 
         self.to_device_func = to_device_func
         self.dataloader = dataloader
-        self.sample_queue: Queue[Tp_co] = Queue(maxsize=prefetch_size)
-        self.stop_event = Event()
-        self.enqueue_thread: Thread | None = None
+        self.next_sample: Tp_co | None = None
+
+    def get_sample(self) -> Tp_co:
+        return self.to_device_func(next(self.dataloader))
 
     def __iter__(self) -> Iterator[Tp_co]:
-        if self.enqueue_thread is None:
-            raise RuntimeError("Prefetcher is not running.")
         return self
 
     def __next__(self) -> Tp_co:
-        if self.enqueue_thread is None:
-            raise RuntimeError("Prefetcher is not running.")
-        return self.sample_queue.get()
+        if self.next_sample is None:
+            self.next_sample = self.get_sample()
+        sample, self.next_sample = self.next_sample, self.get_sample()
+        return sample
 
     def __enter__(self) -> "Prefetcher[Tc_co, Tp_co]":
         if isinstance(self.dataloader, ContextManager):
             self.dataloader = self.dataloader.__enter__()
-        if self.enqueue_thread is not None:
-            raise RuntimeError("Prefetcher is already running.")
-        self.enqueue_thread = Thread(
-            target=enqueue_thread,
-            args=(self.dataloader, self.to_device_func, self.sample_queue, self.stop_event),
-        )
-        self.enqueue_thread.start()
         return self
 
     def __exit__(self, _t: type[BaseException] | None, _e: BaseException | None, _tr: TracebackType | None) -> None:
-        if self.enqueue_thread is None:
-            raise RuntimeError("Prefetcher is not running.")
-        self.stop_event.set()
-        self.enqueue_thread.join()
-        self.enqueue_thread = None
         if isinstance(self.dataloader, ContextManager):
             self.dataloader.__exit__(_t, _e, _tr)
 
