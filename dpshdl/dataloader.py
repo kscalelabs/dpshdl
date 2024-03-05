@@ -18,7 +18,6 @@ from multiprocessing.managers import SyncManager
 from queue import Queue
 from threading import Event
 from types import TracebackType
-import functools
 from typing import Callable, ContextManager, Generic, Self, TypeVar
 
 import numpy as np
