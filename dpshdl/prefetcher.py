@@ -18,6 +18,18 @@ Tc_co = TypeVar("Tc_co", covariant=True)
 Tp_co = TypeVar("Tp_co", covariant=True)
 
 
+def enqueue_thread(
+    dataloader: Iterator[Tc_co],
+    to_device_func: Callable[[Tc_co], Tp_co],
+    queue: Queue[Tp_co],
+    stop_event: Event,
+) -> None:
+    for sample in dataloader:
+        if stop_event.is_set():
+            break
+        queue.put(to_device_func(sample))
+
+
 class Prefetcher(Iterable[Tp_co], Generic[Tc_co, Tp_co]):
     """Helper class for pre-loading samples into device memory."""
 
@@ -35,12 +47,6 @@ class Prefetcher(Iterable[Tp_co], Generic[Tc_co, Tp_co]):
         self.stop_event = Event()
         self.enqueue_thread: Thread | None = None
 
-    def _enqueue_samples(self) -> None:
-        for sample in self.dataloader:
-            if self.stop_event.is_set():
-                break
-            self.sample_queue.put(self.to_device_func(sample))
-
     def __iter__(self) -> Iterator[Tp_co]:
         if self.enqueue_thread is None:
             raise RuntimeError("Prefetcher is not running.")
@@ -56,7 +62,10 @@ class Prefetcher(Iterable[Tp_co], Generic[Tc_co, Tp_co]):
             self.dataloader = self.dataloader.__enter__()
         if self.enqueue_thread is not None:
             raise RuntimeError("Prefetcher is already running.")
-        self.enqueue_thread = Thread(target=self._enqueue_samples, daemon=True)
+        self.enqueue_thread = Thread(
+            target=enqueue_thread,
+            args=(self.dataloader, self.to_device_func, self.sample_queue, self.stop_event),
+        )
         self.enqueue_thread.start()
         return self
 
