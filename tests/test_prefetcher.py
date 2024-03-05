@@ -29,11 +29,10 @@ def to_device_fn(sample: np.ndarray) -> np.ndarray:
 
 @pytest.mark.parametrize("num_workers", [0, 1, 2])
 @pytest.mark.parametrize("batch_size", [1, 4])
-@pytest.mark.parametrize("prefetch_size", [2, 5])
-def test_dataloader(num_workers: int, batch_size: int, prefetch_size: int) -> None:
+def test_dataloader(num_workers: int, batch_size: int) -> None:
     ds = DummyDataset()
     ld = Dataloader(ds, num_workers=num_workers, batch_size=batch_size)
-    with Prefetcher(to_device_fn, ld, prefetch_size) as pf:
+    with Prefetcher(to_device_fn, ld) as pf:
         for sample in itertools.islice(pf, 10):
             assert sample.shape == (batch_size,)
 
