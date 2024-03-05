@@ -18,7 +18,7 @@ from multiprocessing.context import BaseContext
 from queue import Queue
 from threading import Event
 from types import TracebackType
-from typing import Callable, Generic, Self, TypeVar
+from typing import Callable, ContextManager, Generic, Self, TypeVar
 
 import numpy as np
 
@@ -153,7 +153,7 @@ def default_num_workers(default: int) -> int:
     return default
 
 
-class Dataloader(Generic[T, Tc]):
+class Dataloader(Generic[T, Tc], ContextManager):
     """Defines a dataloader for loading data from a dataset.
 
     Usage:
