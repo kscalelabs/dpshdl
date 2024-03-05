@@ -7,7 +7,7 @@ the current sample is being processed.
 """
 
 from types import TracebackType
-from typing import Callable, Generic, Iterable, Iterator, TypeVar
+from typing import Callable, ContextManager, Generic, Iterable, Iterator, TypeVar
 
 from dpshdl.testing import print_sample, run_test
 
@@ -19,7 +19,7 @@ Tp_co = TypeVar("Tp_co", covariant=True)
 class Prefetcher(Iterable[Tp_co], Generic[Tc_co, Tp_co]):
     """Helper class for pre-loading samples into device memory."""
 
-    def __init__(self, to_device_func: Callable[[Tc_co], Tp_co], dataloader: Iterable[Tc_co]) -> None:
+    def __init__(self, to_device_func: Callable[[Tc_co], Tp_co], dataloader: Iterator[Tc_co]) -> None:
         super().__init__()
 
         self.to_device_func = to_device_func
@@ -39,11 +39,13 @@ class Prefetcher(Iterable[Tp_co], Generic[Tc_co, Tp_co]):
         return sample
 
     def __enter__(self) -> "Prefetcher[Tc_co, Tp_co]":
-        self.dataloader.__enter__()
+        if isinstance(self.dataloader, ContextManager):
+            self.dataloader = self.dataloader.__enter__()
         return self
 
     def __exit__(self, _t: type[BaseException] | None, _e: BaseException | None, _tr: TracebackType | None) -> None:
-        self.dataloader.__exit__(_t, _e, _tr)
+        if isinstance(self.dataloader, ContextManager):
+            self.dataloader.__exit__(_t, _e, _tr)
 
     def test(
         self,
