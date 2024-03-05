@@ -173,8 +173,8 @@ class Dataloader(Generic[T, Tc], ContextManager):
             number of CPUs on the system.
         batch_size: The batch size to use.
         prefetch_factor: The number of batches to pre-load from the dataset.
-        ctx: The multiprocessing context to use. If not provided, the default
-            context will be used.
+        mp_manager: The multiprocessing manager to use. If not provided,
+            the default manager will be used.
         dataloader_worker_init_fn: The initialization function to use for
             the dataloader workers, which takes the workd ID and the number of
             workers as input.
