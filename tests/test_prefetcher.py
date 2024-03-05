@@ -39,4 +39,4 @@ def test_dataloader(num_workers: int, batch_size: int) -> None:
 
 if __name__ == "__main__":
     # python -m tests.test_prefetcher
-    test_dataloader(0, 1, 2)
+    test_dataloader(0, 1)
