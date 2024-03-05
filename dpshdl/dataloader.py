@@ -14,7 +14,7 @@ import random
 import threading
 import time
 from dataclasses import dataclass
-from multiprocessing.context import BaseContext
+from multiprocessing.managers import SyncManager
 from queue import Queue
 from threading import Event
 from types import TracebackType
@@ -192,7 +192,7 @@ class Dataloader(Generic[T, Tc], ContextManager):
         num_workers: int | None = None,
         batch_size: int = 1,
         prefetch_factor: int = 2,
-        ctx: BaseContext | None = None,
+        mp_manager: SyncManager | None = None,
         dataloader_worker_init_fn: Callable[[int, int], None] = dataloader_worker_init_fn,
         collate_worker_init_fn: Callable[[], None] = collate_worker_init_fn,
         item_callback: Callable[[CollatedDataloaderItem[Tc]], None] = lambda _: None,
@@ -212,12 +212,11 @@ class Dataloader(Generic[T, Tc], ContextManager):
         self.dataset = dataset
         self.num_workers = num_workers
         self.batch_size = batch_size
-        self.ctx = mp.get_context() if ctx is None else ctx
         self.dataloader_worker_init_fn = dataloader_worker_init_fn
         self.collate_worker_init_fn = collate_worker_init_fn
         self.item_callback = item_callback
         self.raise_errs = raise_errs
-        self.manager = self.ctx.Manager()
+        self.manager = mp.get_context().Manager() if mp_manager is None else mp_manager
 
         self.processes: list[mp.Process] | None = None
         self.single_process_threads: tuple[threading.Thread, threading.Thread] | None = None
