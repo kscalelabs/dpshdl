@@ -32,6 +32,14 @@ T = TypeVar("T")
 Tc = TypeVar("Tc")
 
 
+def identity(t: T) -> T:
+    return t
+
+
+def return_none(t: T) -> None:
+    return None
+
+
 class Timer:
     def __init__(self) -> None:
         super().__init__()
@@ -199,9 +207,9 @@ class Dataloader(Generic[T, Tc], ContextManager):
         mp_manager: SyncManager | None = None,
         dataloader_worker_init_fn: Callable[[int, int], None] = dataloader_worker_init_fn,
         collate_worker_init_fn: Callable[[], None] = collate_worker_init_fn,
-        item_callback: Callable[[CollatedDataloaderItem[Tc]], None] = lambda _: None,
+        item_callback: Callable[[CollatedDataloaderItem[Tc]], None] = return_none,
         raise_errs: bool = False,
-        post_collate_fn: Callable[[Tc], Tc] = lambda x: x,
+        post_collate_fn: Callable[[Tc], Tc] = identity,
     ) -> None:
         super().__init__()
 
