@@ -15,6 +15,7 @@ import threading
 import time
 from dataclasses import dataclass
 from multiprocessing.managers import SyncManager
+from multiprocessing.context import DefaultContext
 from queue import Queue
 from threading import Event
 from types import TracebackType
@@ -183,6 +184,8 @@ class Dataloader(Generic[T, Tc], ContextManager):
             number of CPUs on the system.
         batch_size: The batch size to use.
         prefetch_factor: The number of batches to pre-load from the dataset.
+        mp_context: The multiprocessing context to use. If not provided, the
+            default context will be used.
         mp_manager: The multiprocessing manager to use. If not provided,
             the default manager will be used.
         dataloader_worker_init_fn: The initialization function to use for
@@ -204,6 +207,7 @@ class Dataloader(Generic[T, Tc], ContextManager):
         num_workers: int | None = None,
         batch_size: int = 1,
         prefetch_factor: int = 2,
+        mp_context: DefaultContext | None = None,
         mp_manager: SyncManager | None = None,
         dataloader_worker_init_fn: Callable[[int, int], None] = dataloader_worker_init_fn,
         collate_worker_init_fn: Callable[[], None] = collate_worker_init_fn,
@@ -230,7 +234,8 @@ class Dataloader(Generic[T, Tc], ContextManager):
         self.item_callback = item_callback
         self.raise_errs = raise_errs
         self.post_collate_fn = post_collate_fn
-        self.manager = mp.get_context().Manager() if mp_manager is None else mp_manager
+        self.context = mp.get_context() if mp_context is None else mp_context
+        self.manager = self.context.Manager() if mp_manager is None else mp_manager
 
         self.processes: list[mp.Process] | None = None
         self.single_process_threads: tuple[threading.Thread, threading.Thread] | None = None
@@ -279,7 +284,7 @@ class Dataloader(Generic[T, Tc], ContextManager):
             if self.num_workers > 0:
                 self.processes = []
                 for i in range(self.num_workers):
-                    process = mp.Process(
+                    process = self.context.Process(
                         target=dataloader_worker,
                         args=(
                             self.dataloader_worker_init_fn,
@@ -295,7 +300,7 @@ class Dataloader(Generic[T, Tc], ContextManager):
                     )
                     process.start()
                     self.processes.append(process)
-                collate_process = mp.Process(
+                collate_process = self.context.Process(
                     target=collate_worker,
                     args=(
                         self.collate_worker_init_fn,
