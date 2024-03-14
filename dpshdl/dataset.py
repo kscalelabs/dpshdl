@@ -108,7 +108,7 @@ class Dataset(Iterator[T], Generic[T, Tc], ABC):
         while len(samples) < batch_size:
             try:
                 samples.append(next(sample_iter))
-            except (StopIteration, KeyboardInterrupt):
+            except (KeyboardInterrupt, bdb.BdbQuit, StopIteration):
                 break
             except Exception as e:
                 num_errors += 1
@@ -348,6 +348,8 @@ class ChunkedDataset(Dataset[T, Tc], Generic[T, Tc], ABC):
             self._next_chunk_iterator = self.chunked_dataset_iterator()
         try:
             sample = next(self._next_chunk_iterator)
+        except (KeyboardInterrupt, bdb.BdbQuit):
+            raise
         except Exception:
             self._next_chunk_iterator = None
             raise
@@ -713,7 +715,7 @@ class ErrorHandlingDataset(Dataset[T, Tc]):
         while num_exceptions < self.maximum_exceptions:
             try:
                 return self.dataset.next()
-            except (bdb.BdbQuit, KeyboardInterrupt, StopIteration):
+            except (KeyboardInterrupt, bdb.BdbQuit, StopIteration):
                 raise
             except Exception as e:
                 self.exc_summary.add_exception(e, get_loc(self.traceback_depth))
