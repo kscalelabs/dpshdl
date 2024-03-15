@@ -14,7 +14,9 @@ import random
 import threading
 import time
 from dataclasses import dataclass
+from multiprocessing.context import DefaultContext, ForkContext, ForkServerContext, SpawnContext
 from multiprocessing.managers import SyncManager
+from multiprocessing.process import BaseProcess
 from queue import Queue
 from threading import Event
 from types import TracebackType
@@ -30,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 Tc = TypeVar("Tc")
+
+Context = DefaultContext | ForkContext | ForkServerContext | SpawnContext
 
 
 def identity(t: T) -> T:
@@ -150,6 +154,7 @@ def collate_worker(
                 break
             finally:
                 samples = []
+        samples_queue.task_done()
 
 
 def default_num_workers(default: int) -> int:
@@ -183,6 +188,8 @@ class Dataloader(Generic[T, Tc], ContextManager):
             number of CPUs on the system.
         batch_size: The batch size to use.
         prefetch_factor: The number of batches to pre-load from the dataset.
+        mp_context: The multiprocessing context to use. If not provided, the
+            default context will be used.
         mp_manager: The multiprocessing manager to use. If not provided,
             the default manager will be used.
         dataloader_worker_init_fn: The initialization function to use for
@@ -196,6 +203,7 @@ class Dataloader(Generic[T, Tc], ContextManager):
             the error queue.
         post_collate_fn: A function to call on the collated batch before it is
             returned. This can be used for post-processing the batch.
+        name: A unique name to use for the dataloader.
     """
 
     def __init__(
@@ -204,12 +212,14 @@ class Dataloader(Generic[T, Tc], ContextManager):
         num_workers: int | None = None,
         batch_size: int = 1,
         prefetch_factor: int = 2,
+        mp_context: Context | None = None,
         mp_manager: SyncManager | None = None,
         dataloader_worker_init_fn: Callable[[int, int], None] = dataloader_worker_init_fn,
         collate_worker_init_fn: Callable[[], None] = collate_worker_init_fn,
         item_callback: Callable[[CollatedDataloaderItem[Tc]], None] = return_none,
         raise_errs: bool = False,
         post_collate_fn: Callable[[Tc], Tc] = identity,
+        name: str | None = None,
     ) -> None:
         super().__init__()
 
@@ -230,9 +240,11 @@ class Dataloader(Generic[T, Tc], ContextManager):
         self.item_callback = item_callback
         self.raise_errs = raise_errs
         self.post_collate_fn = post_collate_fn
-        self.manager = mp.get_context().Manager() if mp_manager is None else mp_manager
+        self.name = name
+        self.context = mp.get_context() if mp_context is None else mp_context
+        self.manager = self.context.Manager() if mp_manager is None else mp_manager
 
-        self.processes: list[mp.Process] | None = None
+        self.processes: list[BaseProcess] | None = None
         self.single_process_threads: tuple[threading.Thread, threading.Thread] | None = None
         self.samples_queue: Queue[DataloaderItem[T]] = self.manager.Queue(maxsize=batch_size * prefetch_factor)
         self.collated_queue: Queue[CollatedDataloaderItem[Tc]] = self.manager.Queue(maxsize=prefetch_factor)
@@ -272,14 +284,19 @@ class Dataloader(Generic[T, Tc], ContextManager):
             raise RuntimeError(f"Exception for worker ID(s) {[s.worker_id for s in item.stats]}: {item.exception}")
         if item.item is None:
             raise RuntimeError("`item` should not be `None` unless there was an exception")
+        self.collated_queue.task_done()
         return item.item
+
+    @property
+    def suffix(self) -> str:
+        return "" if self.name is None else f"-{self.name}"
 
     def __enter__(self) -> Self:
         if self.processes is None and self.single_process_threads is None:
             if self.num_workers > 0:
                 self.processes = []
                 for i in range(self.num_workers):
-                    process = mp.Process(
+                    process = self.context.Process(
                         target=dataloader_worker,
                         args=(
                             self.dataloader_worker_init_fn,
@@ -290,12 +307,12 @@ class Dataloader(Generic[T, Tc], ContextManager):
                             self.num_workers,
                             self.raise_errs,
                         ),
-                        daemon=True,
-                        name=f"dataloader-worker-{i}",
+                        daemon=False,
+                        name=f"dataloader-worker-{i}{self.suffix}",
                     )
                     process.start()
                     self.processes.append(process)
-                collate_process = mp.Process(
+                collate_process = self.context.Process(
                     target=collate_worker,
                     args=(
                         self.collate_worker_init_fn,
@@ -307,7 +324,8 @@ class Dataloader(Generic[T, Tc], ContextManager):
                         self.batch_size,
                         self.raise_errs,
                     ),
-                    name="dataloader-worker-collate",
+                    daemon=False,
+                    name=f"dataloader-worker-collate{self.suffix}",
                 )
                 collate_process.start()
                 self.processes.append(collate_process)
@@ -352,29 +370,34 @@ class Dataloader(Generic[T, Tc], ContextManager):
         # the queue. Clearing the queue is important because otherwise the
         # workers will block while trying to put items on the queue.
         self.stop_event.set()
+
         try:
             while not self.collated_queue.empty():
-                self.collated_queue.get_nowait()
+                self.collated_queue.get()
+                self.collated_queue.task_done()
         except Exception:
             pass
         try:
             while not self.samples_queue.empty():
-                self.samples_queue.get_nowait()
+                self.samples_queue.get()
+                self.samples_queue.task_done()
         except Exception:
             pass
 
-        # Joins the dataloader workers.
+        # Terminates the dataloader processes.
         if self.processes is not None:
             for process in self.processes:
                 process.terminate()
+            for process in self.processes:
+                process.join()
             self.processes = None
-        elif self.single_process_threads is not None:
+
+        # Terminates the dataloader separate thread.
+        if self.single_process_threads is not None:
             dataloader_thread, collate_thread = self.single_process_threads
             dataloader_thread.join()
             collate_thread.join()
             self.single_process_thread = None
-        else:
-            raise RuntimeError("Unexpected state")
 
 
 class _DummyDataset(Dataset[int, list[int]]):
